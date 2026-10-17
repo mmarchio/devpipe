@@ -1,0 +1,63 @@
+services:
+  golang:
+    image: golang:latest
+    container_name: devpipe
+    restart: always
+    ports:
+      - "8140:8080" #http front end port
+    volumes:
+      - "../src/:/go/app/src"
+      - "../team/:/team"
+    tty: true
+    networks:
+      - devpipe-network
+    environment:
+      - OVERSEER_CONFIG_PATH=./overseer.yaml
+      - API_SERVER_KEY=ca009f64015ec1f5812330b23218133ad5db4d77228de811cbc381971f870b21
+      - COMPRESSION_API_KEY=none
+  devpipe-hermes:
+    image: msf-hermes:latest
+    container_name: devpipe-hermes
+    restart: always
+    user: "0:0"
+    ports:
+      - "9140:8642"
+    volumes:
+      - "../src/:/go/app/src"
+      - "../team/:/team"
+      - "./hermes.sh:/opt/hermes/hermes.sh"
+      - "./hermes-data:/opt/data"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+     - API_SERVER_ENABLED=true
+     - API_SERVER_HOST=0.0.0.0
+     - API_SERVER_PORT=8642
+     - API_SERVER_KEY=ca009f64015ec1f5812330b23218133ad5db4d77228de811cbc381971f870b21
+    tty: true
+    networks:
+      - devpipe-network
+  worker:
+    image: ghcr.io/ggml-org/llama.cpp:full-cuda13
+    container_name: llamacpp
+    restart: always
+    ports:
+      - "9120:8081" #server port
+#      - "8084:8004" #https front end port
+#      - "8085:8005" #http fs port
+#      - "8086:8006" #https fs port
+    volumes:
+      - "/home/public/workspace/workspace/llama.cpp/models/:/models"
+    tty: true
+    entrypoint: "./llama-server -m /models/Swift-Qwen3.8-27B-Abliterated.Q5_K_M.gguf --reasoning-effort medium -c 262144 --parallel 1 --n-gpu-layers 99 --cache-type-k q8_0 --cache-type-v q4_0 --spec-type draft-mtp --spec-draft-n-max 3  --host 0.0.0.0 --port 8081 --alias swift-qwen-3.8"
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: [gpu]
+networks:
+  devpipe-network:
+    driver: bridge
+
