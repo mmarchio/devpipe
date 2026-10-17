@@ -1,0 +1,8 @@
+{{define "title"}}Workers{{end}}
+{{define "content"}}
+<h1>Worker providers</h1>
+<div class="table-wrap"><table><thead><tr><th scope="col">Kind</th><th scope="col">Provider</th><th scope="col">Type</th><th scope="col">Endpoint host</th><th scope="col">Secret</th><th scope="col">Health</th></tr></thead>
+<tbody>{{range .Data.Providers}}<tr><td>{{.Kind}}</td><td>{{.Name}}</td><td>{{.ProviderKind}}</td><td class="mono">{{.EndpointHost}}</td><td>{{if .SecretConfigured}}configured{{else}}not configured{{end}}</td>
+<td>{{$n := .Name}}{{range $.Data.Health}}{{if eq .Name $n}}{{template "badge" .Status}}{{end}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="muted">No providers configured.</td></tr>{{end}}</tbody></table></div>
+<p class="muted">Per-project worker sessions are shown on each project's Worker page.</p>
+{{end}}

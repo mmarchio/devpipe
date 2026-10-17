@@ -1,0 +1,26 @@
+{{define "title"}}Audit{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<h1>Audit log</h1>
+{{$s := $d.System}}
+{{with $s.AuditVerification}}<div class="banner{{if ne . "VALID"}} warn{{end}}" role="status">Audit chain verification: {{template "badge" .}}{{if ne . "VALID"}}{{if $s.AuditAcknowledged}} — acknowledged by an operator{{else}} — new work is blocked until an operator acknowledges the failure (<span class="mono">POST /api/v1/audit/verify/acknowledge</span>); details: <span class="mono">GET /api/v1/audit/verify</span>{{end}}{{end}}</div>{{end}}
+<form class="filters" method="get" action="/audit" aria-label="Filter audit events">
+<div class="field"><label for="a-p">Project</label><input id="a-p" type="text" name="project" value="{{$d.Q.project}}" maxlength="64"></div>
+<div class="field"><label for="a-e">Execution</label><input id="a-e" type="text" name="execution" value="{{$d.Q.execution}}" maxlength="64"></div>
+<div class="field"><label for="a-ph">Phase</label><input id="a-ph" type="text" name="phase" value="{{$d.Q.phase}}" maxlength="64"></div>
+<div class="field"><label for="a-u">Work unit</label><input id="a-u" type="text" name="unit" value="{{$d.Q.unit}}" maxlength="64"></div>
+<div class="field"><label for="a-a">Event type</label><select id="a-a" name="action"><option value="">Any</option>{{range $d.Actions}}<option value="{{.}}"{{if eq . $d.Q.action}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<div class="field"><label for="a-f">From</label><input id="a-f" type="date" name="from" value="{{$d.Q.from}}"></div>
+<div class="field"><label for="a-t">To</label><input id="a-t" type="date" name="to" value="{{$d.Q.to}}"></div>
+<div class="field"><label for="a-r">Result</label><select id="a-r" name="result"><option value="">Any</option>{{range $d.Results}}<option value="{{.}}"{{if eq . $d.Q.result}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<div class="field"><button type="submit">Filter</button></div>
+</form>
+{{with .Message}}<div class="banner warn" role="alert">{{.}}</div>{{end}}
+<div class="table-wrap"><table><thead><tr><th scope="col">Timestamp</th><th scope="col">Project</th><th scope="col">Execution</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Resource</th><th scope="col">Result</th></tr></thead>
+<tbody>{{range $d.Page.Rows}}<tr><td><a href="/audit/{{.ID}}">{{fmtTime .At}}</a></td><td>{{if .ProjectID}}<a href="/projects/{{.ProjectID}}">{{if .ProjectName}}{{.ProjectName}}{{else}}{{short .ProjectID}}{{end}}</a>{{else}}—{{end}}</td>
+<td class="mono">{{if .ExecutionID}}{{if .ProjectID}}<a href="/projects/{{.ProjectID}}/executions/{{.ExecutionID}}">{{short .ExecutionID}}</a>{{else}}{{short .ExecutionID}}{{end}}{{else}}—{{end}}</td>
+<td>{{.ActorName}} <span class="muted">({{.ActorType}})</span></td><td>{{.Action}}</td><td class="mono">{{.ResourceKind}} {{short .ResourceID}}</td><td>{{template "badge" .Result}}</td></tr>
+{{else}}<tr><td colspan="7" class="muted">No audit events.</td></tr>{{end}}</tbody></table></div>
+{{with $d.Page.NextCursor}}<p><a href="/audit?{{$d.QueryString}}&amp;cursor={{.}}">Older events →</a></p>{{end}}
+<p class="muted">Autonomous engine history is in each execution's timeline.</p>
+{{end}}

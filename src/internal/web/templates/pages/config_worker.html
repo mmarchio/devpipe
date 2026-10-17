@@ -1,0 +1,21 @@
+{{define "title"}}Worker configuration{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Worker configuration</h1>
+{{template "config-banner" .}}
+<form method="post" action="/projects/{{$pid}}/config/worker" class="panel">{{template "csrf" .Shell.CSRF}}
+<input type="hidden" name="project_version" value="{{$d.Settings.version}}"><input type="hidden" name="config_version" value="{{$d.ConfigVersion}}">
+<div class="field"><label for="w-p">Provider</label><select id="w-p" name="worker_provider">{{range $d.Workers}}<option value="{{.Name}}"{{if eq .Name $d.Settings.worker_provider}} selected{{end}}>{{.Name}}</option>{{end}}</select>{{template "fielderror" (index .Errors "worker_provider")}}</div>
+<dl class="facts">{{range $d.Workers}}{{if eq .Name $d.Settings.worker_provider}}
+<dt>Gateway Endpoint</dt><dd class="mono">{{.EndpointHost}}</dd>
+<dt>Capabilities</dt><dd>{{join .Capabilities ", "}}</dd>
+<dt>Secret</dt><dd>{{if .SecretConfigured}}{{template "badge" "CONFIGURED"}} configured{{else}}{{template "badge" "MISSING"}} not configured{{end}}{{with .SecretRef}} <span class="muted">(environment variable <span class="mono">{{.}}</span>)</span>{{end}}</dd>
+{{end}}{{end}}</dl>
+<p class="hint">Secret values are never shown or accepted here; they are referenced from the server environment, so a blank field can never erase them.</p>
+<div class="field"><label for="w-m">Model</label><input id="w-m" name="worker_model" type="text" value="{{$d.Settings.worker_model}}">{{template "fielderror" (index .Errors "worker_model")}}</div>
+<div class="field"><label for="w-cw">Context Window</label><input id="w-cw" name="context_window" type="number" min="1" value="{{$d.Settings.context_window}}">{{template "fielderror" (index .Errors "context_window")}}</div>
+<div class="field"><label for="w-to">Timeout</label><input id="w-to" name="worker_timeout" type="text" value="{{$d.Settings.worker_timeout}}">{{template "fielderror" (index .Errors "worker_timeout")}}</div>
+<div class="field"><label for="w-sp">Session Policy</label><select id="w-sp" name="session_policy">{{range $d.Policies}}<option value="{{.}}"{{if eq . $d.Worker.session_policy}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<div class="field"><label for="w-cs">Concurrent send</label><select id="w-cs" name="concurrent_send">{{range $d.SendPolicies}}<option value="{{.}}"{{if eq . $d.Worker.concurrent_send}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<button type="submit" data-pending="Saving…">Save</button></form>
+{{end}}

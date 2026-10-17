@@ -1,0 +1,15 @@
+{{define "title"}}Compression configuration{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$s := $d.Settings}}{{$pid := .Shell.Project.ID}}
+<h1>Compression configuration</h1>
+{{template "config-banner" .}}
+<form method="post" action="/projects/{{$pid}}/config/compression" class="panel">{{template "csrf" .Shell.CSRF}}
+<input type="hidden" name="config_version" value="{{$d.ConfigVersion}}">
+<dl class="facts"><dt>Provider</dt><dd>{{if $s.provider}}{{$s.provider}}{{else}}none{{end}} <span class="muted">(set on the worker configuration / project settings)</span></dd><dt>Model</dt><dd>{{$s.model}}</dd></dl>
+<div class="field"><label for="c-mode">Mode</label><select id="c-mode" name="mode">{{range $d.Modes}}<option value="{{.}}"{{if eq . $s.mode}} selected{{end}}>{{.}}</option>{{end}}</select>{{template "fielderror" (index .Errors "mode")}}</div>
+<div class="field"><label for="c-tt">Target tokens</label><input id="c-tt" name="target_tokens" type="number" min="0" value="{{$s.target_tokens}}">{{template "fielderror" (index .Errors "target_tokens")}}</div>
+<div class="field"><label for="c-tr">Target ratio</label><input id="c-tr" name="target_ratio" type="number" step="0.01" min="0" value="{{$s.target_ratio}}">{{template "fielderror" (index .Errors "target_ratio")}}</div>
+<div class="field"><label for="c-a">Attempts</label><input id="c-a" name="max_attempts" type="number" min="0" value="{{$s.max_attempts}}">{{template "fielderror" (index .Errors "max_attempts")}}</div>
+<div class="field"><label for="c-v">Validation mode</label><select id="c-v" name="validation_mode">{{range $d.ValidationModes}}<option value="{{.}}"{{if eq . $s.validation_mode}} selected{{end}}>{{.}}</option>{{end}}</select>{{template "fielderror" (index .Errors "validation_mode")}}</div>
+<button type="submit" data-pending="Saving…">Save</button></form>
+{{end}}

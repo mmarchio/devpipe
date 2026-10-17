@@ -1,0 +1,8 @@
+{{define "title"}}Configuration{{end}}
+{{define "content"}}
+<h1>Configuration</h1>
+<p>Global configuration is defined in the server configuration file and environment. Project configuration is edited per project (Configuration tab).</p>
+<h2>Providers</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Kind</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Endpoint host</th><th scope="col">Secret reference</th><th scope="col">Secret</th></tr></thead>
+<tbody>{{range .Data}}<tr><td>{{.Kind}}</td><td>{{.Name}}</td><td>{{.ProviderKind}}</td><td class="mono">{{.EndpointHost}}</td><td class="mono">{{.SecretRef}}</td><td>{{if .SecretConfigured}}configured{{else}}not configured{{end}}</td></tr>{{end}}</tbody></table></div>
+{{end}}

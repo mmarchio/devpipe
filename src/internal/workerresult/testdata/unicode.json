@@ -1,0 +1,1 @@
+{"protocol_version":"1.0","status":"incomplete","summary":"Résumé générée — 日本語のテスト ✓","completed":["Ajouté le parseur ✓"],"remaining":["テストを書く"],"blocking":[],"next_action":"Écrire les tests.","artifacts":[{"path":"internal/ünicode/файл.go","action":"created"}]}

@@ -1,0 +1,57 @@
+{{define "frag-overview"}}{{with .}}
+<div class="grid">
+<section class="panel" aria-labelledby="ov-status">
+  <h2 id="ov-status">Status</h2>
+  <dl class="facts">
+    <dt>Project</dt><dd>{{.Name}}</dd>
+    <dt>Status</dt><dd>{{template "badge" .Status}}</dd>
+    {{with .Execution}}<dt>Execution</dt><dd><a href="/projects/{{$.ProjectID}}/executions/{{.ID}}">#{{.Number}}</a> {{template "badge" .Status}}</dd>
+    {{with .WaitReason}}<dt>Waiting for</dt><dd>{{.}}</dd>{{end}}{{else}}<dt>Execution</dt><dd class="muted">none</dd>{{end}}
+    <dt>Runtime State</dt><dd class="mono">{{if .Runtime.StateKey}}{{.Runtime.StateKey}}{{else}}—{{end}}</dd>
+    <dt>Phases</dt><dd>{{.PhasesDone}} / {{.PhasesTotal}} DONE</dd>
+  </dl>
+</section>
+<section class="panel" aria-labelledby="ov-phase">
+  <h2 id="ov-phase">Current Phase</h2>
+  {{with .Phase}}<p><a href="/projects/{{$.ProjectID}}/phases/{{.ID}}">Phase {{.Order}} — {{.Name}}</a> {{template "badge" .Status}}</p>{{else}}<p class="muted">No current phase.</p>{{end}}
+  {{template "progress" .Progress}}
+  {{with .Plan}}<p>Execution Plan v{{.Version}} <span class="muted">(source WBS v{{.SourceWBS}}, {{.Kind}})</span></p>{{end}}
+  {{if .Staleness.Stale}}<div class="banner warn" role="alert"><strong>! Execution Plan Stale</strong>
+  Current WBS: v{{.Staleness.CurrentWBS}} · Plan source: v{{.Staleness.PlanSource}}<br>Replanning will occur before further execution.</div>{{end}}
+</section>
+<section class="panel" aria-labelledby="ov-unit">
+  <h2 id="ov-unit">Current Work Unit</h2>
+  {{with .CurrentUnit}}<p><a href="/projects/{{$.ProjectID}}/work-units/{{.ID}}">{{.Key}} {{.Name}}</a></p>
+  <p>Overseer: {{template "badge" .Status}} · Stage: {{template "badge" (print .Stage)}}</p>{{else}}<p class="muted">No work unit in progress.</p>{{end}}
+</section>
+<section class="panel" aria-labelledby="ov-ctx">
+  <h2 id="ov-ctx">Worker Context</h2>
+  {{template "meter" .Context}}
+  <p class="muted">Worker context is a separate metric; it never affects WBS progress.</p>
+</section>
+</div>
+{{end}}{{end}}
+
+{{define "frag-current-task"}}<section class="panel" aria-labelledby="ct-h"><h2 id="ct-h">Current Task</h2>
+{{with .}}<dl class="facts">
+  <dt>Task</dt><dd>{{.Key}} {{.Name}}</dd>
+  <dt>Status</dt><dd>{{template "badge" .Status}}</dd>
+  <dt>Role</dt><dd>{{if .Role}}{{.Role}}{{else}}—{{end}}</dd>
+  <dt>Attempt</dt><dd>{{.Attempt}}</dd>
+  <dt>Session</dt><dd class="mono">{{if .SessionID}}{{.SessionID}}{{else}}—{{end}}</dd>
+  <dt>Started</dt><dd>{{fmtTime .StartedAt}}</dd>
+</dl>{{else}}<p class="muted">No active task.</p>{{end}}</section>{{end}}
+
+{{define "frag-flows"}}<section class="panel" aria-labelledby="fl-h"><h2 id="fl-h">Live flow</h2>
+{{range .}}{{template "flow" .}}{{else}}<p class="muted">No flow.</p>{{end}}</section>{{end}}
+
+{{define "frag-actions"}}{{with .}}<div class="actions" aria-label="Execution controls">
+{{$csrf := .CSRF}}{{$id := .ProjectID}}
+{{range .Actions}}
+  {{if eq . "START"}}<a class="button" href="/projects/{{$id}}/start">Start Project…</a>{{end}}
+  {{if eq . "PAUSE"}}{{template "control" (dict "Action" (print "/projects/" $id "/pause") "CSRF" $csrf "Label" "Pause" "Class" "secondary")}}{{end}}
+  {{if eq . "RESUME"}}{{template "control" (dict "Action" (print "/projects/" $id "/resume") "CSRF" $csrf "Label" "Resume")}}{{end}}
+  {{if eq . "CANCEL"}}<a class="button secondary" href="/projects/{{$id}}/cancel">Cancel…</a>{{end}}
+  {{if eq . "RESOLVE_RECOVERY"}}{{with $.ExecutionID}}<a class="button" href="/projects/{{$id}}/executions/{{.}}/recovery">Recovery…</a>{{end}}{{end}}
+{{else}}<span class="muted">No control actions are available in the current state.</span>{{end}}
+</div>{{end}}{{end}}

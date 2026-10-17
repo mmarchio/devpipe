@@ -1,0 +1,11 @@
+{{define "title"}}Roles — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$pid := .Shell.Project.ID}}
+<h1>Roles</h1>
+<p class="muted">Loaded from the role service: the default roles plus any custom roles.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Key</th><th scope="col">Name</th><th scope="col">Scope</th><th scope="col">Enabled</th><th scope="col">Version</th><th scope="col"></th></tr></thead>
+<tbody>{{range .Data}}<tr><td class="mono">{{.key}}</td><td>{{.name}}</td><td>{{if .project_id}}Project{{else}}Global default{{end}}</td>
+<td>{{if .enabled}}{{template "badge" "ENABLED"}}{{else}}{{template "badge" "DISABLED"}}{{end}}</td><td>{{.version}}</td>
+<td>{{if .project_id}}<a href="/projects/{{$pid}}/roles/{{.id}}">Edit</a> · {{end}}<a href="/projects/{{$pid}}/roles/{{.id}}/preview">Preview</a></td></tr>
+{{else}}<tr><td colspan="6" class="muted">No roles.</td></tr>{{end}}</tbody></table></div>
+{{end}}

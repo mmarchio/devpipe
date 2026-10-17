@@ -1,0 +1,11 @@
+{{define "title"}}Role preview{{end}}
+{{define "content"}}
+{{$p := .Data}}
+<h1>Resolved role {{$p.key}} <span class="muted">v{{$p.version}}</span></h1>
+<p class="muted">Resolved by the Phase 5 role service.</p>
+<section class="panel"><h2>System Prompt <span class="muted">v{{$p.system_prompt.version}}</span></h2><pre>{{$p.system_prompt.content}}</pre></section>
+<section class="panel"><h2>+ Role Instructions</h2>{{range $p.instructions}}<h3>{{.name}} <span class="muted">({{.key}} v{{.version}})</span></h3><pre>{{.content}}</pre>{{else}}<p class="muted">None.</p>{{end}}</section>
+<section class="panel"><h2>+ Allowed States</h2>{{range $p.allowed_states}}<span class="badge muted">{{.}}</span> {{else}}<p class="muted">Any state.</p>{{end}}</section>
+<section class="panel"><h2>+ Required State Files</h2>{{range $p.state_files}}<span class="badge muted">{{.}}</span> {{else}}<p class="muted">None.</p>{{end}}</section>
+{{with $p.configuration_hash}}<p class="mono">configuration hash {{.}}</p>{{end}}
+{{end}}

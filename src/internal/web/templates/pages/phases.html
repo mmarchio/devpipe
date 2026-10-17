@@ -1,0 +1,65 @@
+{{define "title"}}Phases — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+<h1>Phases</h1>
+{{with .Data.OrderError}}<div class="banner" role="alert">{{.}}</div>{{end}}
+{{$reorder := .Data.Reorderable}}
+<form method="post" action="/projects/{{.Shell.Project.ID}}/phases/order" data-phase-order>
+{{template "csrf" .Shell.CSRF}}
+{{if $reorder}}<p class="hint" data-phase-order-hint>Phases that have not started can be reordered: drag them by the handle, or use Move up / Move down. Started phases keep their positions.</p>{{end}}
+<div class="table-wrap"><table>
+<caption class="visually-hidden">Phases in persisted order</caption>
+<thead><tr>{{if $reorder}}<th scope="col"><span class="visually-hidden">Reorder</span></th>{{end}}<th scope="col">#</th><th scope="col">Phase</th><th scope="col">Status</th><th scope="col">Progress</th><th scope="col">WBS</th><th scope="col">Plan</th></tr></thead>
+<tbody data-phase-order-rows>{{range .Data.Phases}}<tr{{if .Current}} class="current"{{end}} data-phase-id="{{.ID}}"{{if .Movable}} data-movable{{end}}>
+{{if $reorder}}<td class="reorder">{{if .Movable}}<span class="drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
+<button type="submit" name="move" value="{{.ID}}:up" class="secondary icon" title="Move {{.Name}} up"><span aria-hidden="true">↑</span><span class="visually-hidden">Move {{.Name}} up</span></button>
+<button type="submit" name="move" value="{{.ID}}:down" class="secondary icon" title="Move {{.Name}} down"><span aria-hidden="true">↓</span><span class="visually-hidden">Move {{.Name}} down</span></button>
+{{else}}<span class="muted" title="Cannot move: {{.LockReason}}">—</span>{{end}}</td>{{end}}
+<td>{{.Order}}<input type="hidden" name="phase_ids" value="{{.ID}}"></td><td><a href="/projects/{{$.Shell.Project.ID}}/phases/{{.ID}}">{{.Name}}</a>{{if .Current}} <strong>(current)</strong>{{end}}</td>
+<td>{{template "badge" .Status}}</td>
+<td>{{pct .Progress.Percent}} <span class="muted">({{.Progress.Label}})</span></td>
+<td>{{if .WBSVersion}}v{{.WBSVersion}}{{else}}<span class="muted">none</span>{{end}}</td>
+<td>{{with .Plan}}v{{.Version}} (WBS v{{.SourceWBS}}){{else}}<span class="muted">not planned</span>{{end}}{{if .Staleness.Stale}} {{template "badge" "STALE"}}{{end}}</td>
+</tr>{{else}}<tr><td colspan="6" class="muted">No phases yet.</td></tr>{{end}}</tbody></table></div>
+{{if $reorder}}<div class="actions" data-phase-order-actions hidden>
+<button type="submit" data-pending="Saving…">Save order</button>
+<button type="button" class="secondary" data-phase-order-reset>Reset</button>
+<span class="muted" role="status" data-phase-order-status></span>
+</div>{{end}}
+</form>
+<section class="panel" aria-labelledby="upload-h">
+<h2 id="upload-h">Upload phases from files</h2>
+<p>Each <code>.md</code> or <code>.txt</code> file becomes a new phase appended to the end of the project, in file-name order: the file name (without extension) becomes the phase name and its contents become the initial WBS. Every file is checked before any phase is appended.</p>
+{{with .Data.UploadError}}<div class="banner" role="alert">{{.}}</div>{{end}}
+<form method="post" action="/projects/{{.Shell.Project.ID}}/phases/wbs-upload" enctype="multipart/form-data" data-phases-upload>
+{{template "csrf" .Shell.CSRF}}
+<div class="field dropzone" data-phases-drop>
+<label for="ph-files">Phase files</label>
+<p class="hint" data-phases-drop-hint hidden>Drop one or more files here, or choose them (up to 2 MiB in total).</p>
+<input id="ph-files" name="files" type="file" multiple required accept=".md,.txt,text/markdown,text/plain">
+<ul class="file-list" data-phases-list hidden></ul>
+<p class="error" data-phases-error role="alert" hidden></p>
+</div>
+<button type="submit" data-phases-submit data-pending="Uploading…">Append phases</button>
+</form>
+</section>
+<section class="panel" aria-labelledby="append-h">
+<h2 id="append-h">Append a phase</h2>
+<p><strong>New phases are appended to the end of the project.</strong> Phases that have not started can be reordered in the table above.</p>
+{{with .Message}}<div class="banner" role="alert">{{.}}</div>{{end}}
+<form method="post" action="/projects/{{.Shell.Project.ID}}/phases">
+{{template "csrf" .Shell.CSRF}}
+<div class="field dropzone" data-phase-upload hidden>
+<label for="ph-file">Load from file</label>
+<p class="hint">Drop a <code>.md</code> or <code>.txt</code> file here, or choose one. The file name (without extension) becomes the name and its contents become the initial WBS. Dropping several files moves them to <a href="#upload-h">Upload phases from files</a>.</p>
+<input id="ph-file" type="file" accept=".md,.txt,text/markdown,text/plain">
+<p class="error" data-phase-upload-error role="alert" hidden></p>
+</div>
+<div class="field"><label for="ph-name">Name</label><input id="ph-name" name="name" type="text" required maxlength="200" value="{{index .Form "name"}}">{{template "fielderror" (index .Errors "name")}}</div>
+<div class="field"><label for="ph-desc">Description</label><input id="ph-desc" name="description" type="text" maxlength="4000" value="{{index .Form "description"}}"></div>
+<div class="field"><label for="ph-wbs">Initial WBS <span class="muted">(optional)</span></label>
+<p class="hint">When provided, the phase is created with this document as WBS v1.</p>
+<textarea id="ph-wbs" name="wbs">{{index .Form "wbs"}}</textarea></div>
+<button type="submit" data-pending="Appending…">Append phase</button>
+</form>
+</section>
+{{end}}

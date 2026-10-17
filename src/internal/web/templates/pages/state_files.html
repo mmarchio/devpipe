@@ -1,0 +1,9 @@
+{{define "title"}}State files — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$pid := .Shell.Project.ID}}
+<h1>State files</h1>
+<p class="muted">Loaded through the Phase 7 state file service.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Type</th><th scope="col">Scope</th><th scope="col">Source</th><th scope="col">Version</th><th scope="col">Drift</th><th scope="col"></th></tr></thead>
+<tbody>{{range .Data.Files}}<tr><td class="mono">{{.TypeKey}}</td><td>{{.Scope}}</td><td>{{.Source}}</td><td>v{{.CurrentVersion}}</td><td>{{with .Drift}}{{template "badge" .}}{{else}}—{{end}}</td>
+<td><a href="/projects/{{$pid}}/state-files/{{.ID}}">Open</a></td></tr>{{else}}<tr><td colspan="6" class="muted">No state files.</td></tr>{{end}}</tbody></table></div>
+{{end}}

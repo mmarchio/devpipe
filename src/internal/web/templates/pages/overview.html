@@ -1,0 +1,19 @@
+{{define "title"}}{{.Data.Overview.Name}}{{end}}
+{{define "content"}}
+{{$o := .Data.Overview}}
+<h1>Project: {{$o.Name}}</h1>
+{{with $o.Description}}<p>{{.}}</p>{{end}}
+<p class="muted"><a href="/api/v1/projects/{{$.Shell.Project.ID}}/diagnostics">Diagnostic bundle (JSON)</a></p>
+{{with .Data.Drift.Items}}<section class="banner warn" role="status" aria-label="Configuration drift">
+<h2>! Configuration Drift</h2>
+<p>The active execution keeps the configuration it captured; these changes apply only to later executions.</p>
+<ul>{{range .}}<li>{{.Section}} ({{.Source}}): {{.Detail}}</li>{{end}}</ul>
+</section>{{end}}
+<div data-fragment-url="/projects/{{$o.ProjectID}}/fragments/actions">{{template "frag-actions" .Data.Actions}}</div>
+<div data-fragment-url="/projects/{{$o.ProjectID}}/fragments/overview">{{template "frag-overview" $o}}</div>
+<div class="grid">
+<div data-fragment-url="/projects/{{$o.ProjectID}}/fragments/current-task">{{template "frag-current-task" $o.CurrentTask}}</div>
+<div data-fragment-url="/projects/{{$o.ProjectID}}/fragments/flows">{{template "frag-flows" .Data.Flows}}</div>
+</div>
+<p class="muted">Every value on this page is read from the backend; refreshing reconstructs it completely.</p>
+{{end}}

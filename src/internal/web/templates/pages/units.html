@@ -1,0 +1,15 @@
+{{define "title"}}Work units — Phase {{.Data.Phase.Order}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Work units — Phase {{$d.Phase.Order}} {{$d.Phase.Name}}</h1>
+{{with $d.Units.Plan}}<p>Execution Plan v{{.Version}} · source WBS v{{.SourceWBS}} · {{.Status}}</p>{{end}}
+<form class="filters" method="get" action="/projects/{{$pid}}/phases/{{$d.Phase.ID}}/work-units" aria-label="Filter work units">
+<div class="field"><label for="u-status">Status</label><select id="u-status" name="status"><option value="">Any</option>{{range $d.Statuses}}<option value="{{.}}"{{if eq . $d.Status}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<div class="field"><label for="u-kind">Kind</label><select id="u-kind" name="kind"><option value="">Any</option>{{range $d.Kinds}}<option value="{{.}}"{{if eq . $d.Kind}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<div class="field"><label for="u-ready">Dependency readiness</label><select id="u-ready" name="readiness"><option value="">Any</option><option value="READY"{{if eq $d.Readiness "READY"}} selected{{end}}>READY</option><option value="BLOCKED"{{if eq $d.Readiness "BLOCKED"}} selected{{end}}>BLOCKED</option></select></div>
+<div class="field"><label for="u-val">Validation result</label><select id="u-val" name="validation"><option value="">Any</option>{{range $d.Validations}}<option value="{{.}}"{{if eq . $d.Validation}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<div class="field"><button type="submit">Filter</button></div>
+</form>
+<div data-fragment-url="/projects/{{$pid}}/fragments/units?phase={{$d.Phase.ID}}&amp;{{$d.Query}}">{{template "frag-units" $d.Units}}</div>
+{{template "pager" (dict "Page" $d.Units.Page "Base" $d.PagerBase)}}
+{{end}}

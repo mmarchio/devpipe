@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS execution_plans (
+	id UUID PRIMARY KEY,
+	phase_id UUID NOT NULL REFERENCES phases (id) ON DELETE CASCADE,
+	wbs_version INTEGER NOT NULL CHECK (wbs_version > 0),
+	version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+	status TEXT NOT NULL DEFAULT 'READY'
+		CHECK (status IN ('GENERATING','READY','EXECUTING','COMPLETED','SUPERSEDED','FAILED')),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	UNIQUE (phase_id, version)
+);

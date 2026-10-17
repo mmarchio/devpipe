@@ -1,0 +1,29 @@
+{{define "title"}}System status{{end}}
+{{define "content"}}
+{{$s := .Data}}
+<h1>System status</h1>
+{{with $s.AuditVerification}}<div class="banner{{if ne . "VALID"}} warn{{end}}" role="status">Audit chain verification: {{template "badge" .}}{{if ne . "VALID"}}{{if $s.AuditAcknowledged}} — acknowledged by an operator{{else}} — new work is blocked until an operator acknowledges the failure (<span class="mono">POST /api/v1/audit/verify/acknowledge</span>); details: <span class="mono">GET /api/v1/audit/verify</span>{{end}}{{end}}</div>{{end}}
+{{range $s.Alerts}}<div class="banner warn" role="alert">Alert {{template "badge" .ID}}{{with .Detail}} — {{.}}{{end}} <span class="muted">since {{fmtTime .Since}}</span></div>{{end}}
+{{range $s.NewWorkBlocked}}<div class="banner warn" role="alert">New work blocked: {{.}}</div>{{end}}
+<section class="panel"><dl class="facts">
+<dt>Database</dt><dd>{{template "badge" $s.Database}}</dd>
+<dt>Scheduler</dt><dd>{{if $s.SchedulerEnabled}}{{template "badge" "RUNNING"}} every {{$s.SchedulerInterval}}{{else}}{{template "badge" "DISABLED"}}{{end}}</dd>
+<dt>Active Executions</dt><dd>{{$s.ActiveExecutions}}</dd>
+<dt>Validation Capacity</dt><dd>{{$s.ActiveValidations}} running / {{$s.ValidationCapacity}} workers</dd>
+<dt>Version</dt><dd>{{$s.Version}}</dd><dt>Profile</dt><dd>{{$s.Profile}}</dd><dt>Schema version</dt><dd>{{$s.SchemaVersion}}</dd><dt>Instance</dt><dd>{{$s.InstanceID}}</dd><dt>Uptime</dt><dd>{{$s.Uptime}} (since {{fmtTime $s.StartedAt}})</dd>
+</dl></section>
+<section class="panel"><h2>Scheduler Status</h2><dl class="facts">
+<dt>Runnable executions</dt><dd>{{$s.Runnable}}</dd><dt>Waiting executions</dt><dd>{{$s.Waiting}}</dd>
+<dt>Active worker dispatches</dt><dd>{{$s.ActiveDispatches}}</dd><dt>Active validations</dt><dd>{{$s.ActiveValidations}}</dd></dl></section>
+<section class="panel"><h2>Provider Health</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Kind</th><th scope="col">Provider</th><th scope="col">Status</th></tr></thead>
+<tbody>{{range $s.Providers}}<tr><td>{{.Kind}}</td><td>{{.Name}}</td><td>{{template "badge" .Status}}{{with .Detail}} <span class="muted">{{.}}</span>{{end}}</td></tr>{{end}}</tbody></table></div>
+<p class="muted">An unhealthy provider does not mark the overseer process unhealthy: <span class="mono">/health</span> reports liveness, <span class="mono">/ready</span> readiness.</p></section>
+<section class="panel"><h2>Production Readiness</h2>
+{{with $s.Readiness}}<p>{{template "badge" .Status}}</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Area</th><th scope="col">Check</th><th scope="col">Result</th><th scope="col">Detail</th></tr></thead>
+<tbody>{{range .Checks}}<tr><td>{{.Area}}</td><td>{{.Name}}</td><td>{{template "badge" .Status}}</td><td>{{.Detail}}</td></tr>{{end}}</tbody></table></div>
+{{else}}<p class="muted">Readiness report unavailable.</p>{{end}}
+<p>Diagnostics: <a href="/api/v1/system/diagnostics">system bundle (JSON)</a> · <a href="/api/v1/system/health">health</a> · <a href="/api/v1/system/alerts">alerts</a></p>
+</section>
+{{end}}

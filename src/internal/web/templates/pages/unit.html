@@ -1,0 +1,58 @@
+{{define "title"}}{{.Data.Unit.Key}} — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$u := $d.Unit}}{{$pid := .Shell.Project.ID}}
+<h1>Work unit {{$u.Key}} — {{$u.Name}}</h1>
+<p><a href="/projects/{{$pid}}/phases/{{$d.PhaseID}}/work-units">← Phase work units</a> · plan v{{$d.PlanVersion}}</p>
+<div class="grid">
+<section class="panel" aria-labelledby="st-h"><h2 id="st-h">State</h2>
+<dl class="facts">
+  <dt>Overseer State</dt><dd>{{template "badge" $d.Report.Overseer}} <span class="muted">(authoritative)</span></dd>
+  <dt>Worker Report</dt><dd>{{template "badge" $d.Report.Worker}} <span class="muted">(advisory — never marks the unit DONE)</span></dd>
+  <dt>Kind</dt><dd>{{$u.Kind}}</dd>
+  <dt>Dependency readiness</dt><dd>{{$u.Readiness}}</dd>
+  <dt>Attempts</dt><dd>{{$u.Attempts}}</dd>
+  <dt>Validation</dt><dd>{{with $u.Validation}}{{template "badge" .}}{{else}}—{{end}}</dd>
+  <dt>Checkpoint</dt><dd>{{with $u.Checkpoint}}{{template "badge" .}}{{else}}—{{end}}</dd>
+  <dt>Started</dt><dd>{{fmtTime $u.StartedAt}}</dd><dt>Completed</dt><dd>{{fmtTime $u.CompletedAt}}</dd>
+</dl>
+{{template "flow" $d.Stages}}
+</section>
+<section class="panel"><h2>Definition</h2>
+<h3>Objective</h3><p>{{$d.Objective}}</p>
+{{with $d.Instructions}}<h3>Instructions</h3><pre>{{.}}</pre>{{end}}
+<h3>Dependencies</h3>{{with $d.Incoming}}<ul>{{range .}}<li>{{.FromKey}} → {{.ToKey}}</li>{{end}}</ul>{{else}}<p class="muted">None.</p>{{end}}
+<h3>Tests</h3>{{with $d.Tests}}<ul>{{range .}}<li class="mono">{{.}}</li>{{end}}</ul>{{else}}<p class="muted">None declared.</p>{{end}}
+<h3>Validation commands</h3>{{with $d.Validation}}<ul>{{range .}}<li class="mono">{{.}}</li>{{end}}</ul>{{else}}<p class="muted">From engine settings.</p>{{end}}
+<h3>Constraints</h3>{{with $d.Constraints}}<ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{else}}<p class="muted">None.</p>{{end}}
+</section>
+</div>
+<section class="panel"><h2>Acceptance Criteria</h2>
+<ul>{{range $d.Acceptance}}<li><span aria-hidden="true">{{.Symbol}}</span> AC-{{add .Index 1}} {{.Text}} — <strong>{{.Label}}</strong>{{with .Verification}} <span class="muted">({{.}})</span>{{end}}</li>{{else}}<li class="muted">None.</li>{{end}}</ul>
+</section>
+<section class="panel"><h2>Worker Attempts</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Dispatch</th><th scope="col">State</th><th scope="col">Role</th><th scope="col">Delivery</th><th scope="col">Created</th><th scope="col">Duration</th></tr></thead>
+<tbody>{{range $d.Dispatches}}<tr><td class="mono">{{short .ID}}</td><td>{{.State}}</td><td>{{.Role}}</td><td>{{template "badge" .DeliveryTag}}</td><td>{{fmtTime .CreatedAt}}</td><td>{{seconds .DurationMS}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">No dispatches.</td></tr>{{end}}</tbody></table></div>
+<h3>Worker reports (advisory)</h3>
+{{range $d.Results}}<div class="panel"><p>Worker: {{template "badge" .Status}} · Overseer: {{template "badge" .Report.Overseer}} · <a href="/projects/{{$pid}}/results/{{.ID}}">detail</a></p><p>{{.Summary}}</p></div>{{else}}<p class="muted">No worker results.</p>{{end}}
+</section>
+<section class="panel"><h2>Continuations</h2>
+{{range $d.Continuations}}<p>Continuation #{{.Number}} — {{.StrategyLabel}} — {{.Reason}}{{with .ContextBefore}} — context before {{pct (deref .)}}{{end}} — {{template "badge" .Status}}</p>{{else}}<p class="muted">None.</p>{{end}}
+</section>
+<section class="panel"><h2>Validation</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Run</th><th scope="col">Attempt</th><th scope="col">Status</th><th scope="col">Commands</th><th scope="col">Started</th></tr></thead>
+<tbody>{{range $d.Validations}}<tr><td><a href="/projects/{{$pid}}/validations/{{.ID}}">{{short .ID}}</a></td><td>{{.Attempt}}</td><td>{{template "badge" .Status}}</td><td>{{.Commands}} ({{.Failed}} failed)</td><td>{{fmtTime .StartedAt}}</td></tr>
+{{else}}<tr><td colspan="5" class="muted">No validation runs.</td></tr>{{end}}</tbody></table></div>
+{{range $d.FixAttempts}}<p>Fix Attempt {{.Attempt}} / {{.Max}} — reason: {{.Reason}} — worker {{if .Role}}{{.Role}}{{else}}—{{end}} — {{template "badge" .Status}}</p>{{end}}
+</section>
+<section class="panel"><h2>Checkpoint</h2>
+{{range $d.Checkpoints}}<p><a href="/projects/{{$pid}}/checkpoints/{{.ID}}">{{.Kind}}</a> {{template "badge" .Status}} {{with .ShortCommit}}<span class="mono">{{.}}</span>{{end}}</p>{{else}}<p class="muted">No checkpoint yet.</p>{{end}}
+</section>
+<section class="panel"><h2>Lineage</h2>
+{{with $d.Lineage}}<p>{{if .Complete}}{{template "badge" "COMPLETE"}}{{else}}{{template "badge" "INCOMPLETE"}}{{end}} · WBS v{{.WBSVersion}} <span class="mono">{{short .WBSHash}}</span> · plan v{{.PlanVersion}}</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Dispatch</th><th scope="col">Attempt</th><th scope="col">Status</th><th scope="col">Canonical prompt</th><th scope="col">Worker prompt</th><th scope="col">Correlation</th></tr></thead>
+<tbody>{{range .Dispatches}}<tr><td class="mono">{{short .ID}}</td><td>{{.Attempt}}</td><td>{{template "badge" .Status}}</td><td class="mono">{{short .Prompt.CanonicalPromptHash}}</td><td class="mono">{{short .Prompt.WorkerPromptHash}}</td><td class="mono">{{.CorrelationID}}</td></tr>{{else}}<tr><td colspan="6" class="muted">No dispatches.</td></tr>{{end}}</tbody></table></div>
+{{else}}<p class="muted">Lineage unavailable.</p>{{end}}
+<p><a href="{{$d.LineagePath}}">Full lineage (JSON)</a></p>
+</section>
+{{end}}

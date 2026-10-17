@@ -1,0 +1,42 @@
+{{define "title"}}Recovery — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$r := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Recovery</h1>
+{{with .Message}}<div class="banner" role="alert">{{.}}</div>{{end}}
+{{with $r.Condition}}<p>Condition: <strong>{{.}}</strong> · Classification: <strong>{{$r.Classification}}</strong> · Evidence <code>{{short $r.PlanHash}}</code></p>{{end}}
+<div data-fragment-url="/projects/{{$pid}}/fragments/recovery?execution={{$r.ExecutionID}}">{{template "frag-recovery" $r}}</div>
+{{if $r.Required}}
+<section class="panel"><h2>Approved recovery actions</h2>
+<p class="muted">Only actions approved by the backend recovery rules are offered. There is no generic "retry worker": an unknown delivery is reconciled, never blindly resent.</p>
+{{range $r.Actions}}<form method="post" action="/projects/{{$pid}}/executions/{{$r.ExecutionID}}/recovery" class="panel">
+{{template "csrf" $.Shell.CSRF}}<input type="hidden" name="action" value="{{.Kind}}">
+<input type="hidden" name="idempotency_key" value="{{newKey}}"><input type="hidden" name="evidence_hash" value="{{$r.PlanHash}}">
+<h3>{{.Label}}</h3>
+{{if eq .Kind "RESOLVE_DELIVERY"}}<div class="field"><label>Resolution
+<select name="resolution" required><option value="">— choose after reviewing the evidence —</option>
+<option value="ACCEPT_REPOSITORY_STATE">Accept repository state (validate deterministically, do not resend)</option>
+<option value="RESEND_AFTER_REVIEW">Resend once after review (the worker did not process the request)</option></select></label></div>{{end}}
+{{if .HighImpact}}<div class="field"><label>Reason (required)<input type="text" name="reason" required maxlength="2000"></label></div>
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> I reviewed the evidence and confirm this high-impact action.</label></div>
+{{else}}<div class="field"><label>Reason (optional)<input type="text" name="reason" maxlength="2000"></label></div>{{end}}
+<button type="submit" data-pending="Requesting…">{{.Label}}</button>
+<button type="submit" name="dry_run" value="1" formnovalidate class="secondary">Preview changes (dry run)</button></form>
+{{else}}<p class="muted">No recovery action is available.</p>{{end}}
+</section>{{end}}
+<section class="panel"><h2>Evidence <span class="muted">(read-only)</span></h2>
+<dl class="facts">
+{{with $r.Dispatch}}<dt>Dispatch</dt><dd class="mono">{{.ID}} — {{template "badge" .DeliveryTag}}</dd><dt>Worker session</dt><dd class="mono">{{.SessionID}}</dd>{{end}}
+{{with $r.PromptHash}}<dt>Prompt hash</dt><dd class="mono">{{.}}</dd>{{end}}
+{{with $r.Repository}}<dt>Repository before</dt><dd class="mono">{{if .BaselineHead}}{{.BaselineHead}}{{else}}—{{end}}</dd><dt>Repository now</dt><dd class="mono">{{.Head}}{{if .Dirty}} (dirty){{end}}</dd>{{end}}
+{{with $r.Validation}}<dt>Validation evidence</dt><dd><a href="/projects/{{$pid}}/validations/{{.ID}}">{{.Label}} {{template "badge" .Status}}</a></dd>{{end}}
+{{range $k, $v := $r.Evidence}}<dt class="mono">{{$k}}</dt><dd class="mono">{{$v}}</dd>{{end}}
+</dl>
+{{if $r.Dispatch}}<h3>Prompt sent</h3>
+{{with $r.Prompt}}<p class="muted">{{.Source}} · hash <code>{{short .Hash}}</code></p><pre>{{.Content}}</pre>
+{{else}}<p class="muted">The prompt of this dispatch is not available.</p>{{end}}
+<h3>Model response</h3>
+{{with $r.Response}}<p class="muted">Received {{.CompletedAt.Format "2006-01-02 15:04:05 MST"}} · hash <code>{{short .ContentHash}}</code></p><pre>{{.Content}}</pre>
+{{else}}<p class="muted">No model response was recorded for this dispatch.</p>{{end}}{{end}}
+</section>
+<section class="panel"><h2>Related events</h2>{{template "timeline-rows" $r.Events}}</section>
+{{end}}

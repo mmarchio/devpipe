@@ -1,0 +1,31 @@
+{{define "title"}}Worker — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Worker</h1>
+<section class="panel"><h2>Worker Session</h2>
+{{with $d.Panel}}<dl class="facts">
+  <dt>Provider</dt><dd>{{if .Provider}}{{.Provider}}{{else}}—{{end}}</dd>
+  <dt>Session ID</dt><dd class="mono">{{if .SessionID}}{{.SessionID}}{{else}}no active session{{end}}</dd>
+  {{with .ProviderSess}}<dt>Provider session</dt><dd class="mono">{{.}}</dd>{{end}}
+  <dt>Status</dt><dd>{{with .Status}}{{template "badge" .}}{{else}}—{{end}}</dd>
+  <dt>Connection</dt><dd>{{with .Connection}}{{.}}{{else}}—{{end}}</dd>
+  <dt>Model</dt><dd>{{if .Model}}{{.Model}}{{else}}—{{end}}</dd>
+  <dt>Current CWD</dt><dd class="mono">{{if .CWD}}{{.CWD}}{{else}}—{{end}}</dd>
+  <dt>Created</dt><dd>{{fmtTime .CreatedAt}}</dd><dt>Last activity</dt><dd>{{fmtTime .LastActivity}}</dd>
+</dl>{{template "meter" .Context}}{{end}}
+<p class="muted">Transport credentials are never displayed.</p>
+</section>
+{{template "provider-test" (dict "Action" (print "/projects/" $pid "/worker/test") "CSRF" .Shell.CSRF "Provider" $d.Provider "Model" $d.Model "Test" $d.Test)}}
+<section class="panel"><h2>Dispatch History</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Dispatch</th><th scope="col">State</th><th scope="col">Role</th><th scope="col">Prompt</th><th scope="col">Delivery Status</th><th scope="col">Unit</th><th scope="col">Duration</th><th scope="col">Created</th></tr></thead>
+<tbody>{{range $d.Dispatches}}<tr><td class="mono">{{short .ID}}</td><td>{{.State}}</td><td>{{.Role}}</td><td><a href="/projects/{{$pid}}/prompts/worker/{{.PromptID}}">{{short .PromptID}}</a></td>
+<td>{{template "badge" .DeliveryTag}}</td><td>{{with .UnitID}}<a href="/projects/{{$pid}}/work-units/{{.}}">{{short .}}</a>{{else}}—{{end}}</td><td>{{seconds .DurationMS}}</td><td>{{fmtTime .CreatedAt}}</td></tr>
+{{else}}<tr><td colspan="8" class="muted">No dispatches.</td></tr>{{end}}</tbody></table></div>
+{{template "pager" (dict "Page" $d.Page "Base" (print "/projects/" $pid "/worker?"))}}
+</section>
+<section class="panel"><h2>Worker results (advisory)</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Result</th><th scope="col">Worker report</th><th scope="col">Summary</th><th scope="col">Created</th></tr></thead>
+<tbody>{{range $d.Results}}<tr><td><a href="/projects/{{$pid}}/results/{{.id}}">{{short .id}}</a></td><td>{{template "badge" (upper .status)}}</td><td>{{truncate .summary 160}}</td><td>{{fmtTime .created_at}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">No results.</td></tr>{{end}}</tbody></table></div>
+</section>
+{{end}}

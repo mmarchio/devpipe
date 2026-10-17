@@ -1,0 +1,11 @@
+{{define "title"}}Prompts — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$pid := .Shell.Project.ID}}
+<h1>Prompts</h1>
+<div class="actions"><a class="button" href="/projects/{{$pid}}/prompts/preview">Prompt preview</a> <a class="button secondary" href="/projects/{{$pid}}/cache">Prompt cache</a> <a class="button secondary" href="/projects/{{$pid}}/precompute">Precomputation</a></div>
+<h2>Canonical prompt history</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Prompt</th><th scope="col">State</th><th scope="col">Template</th><th scope="col">Tokens</th><th scope="col">Created</th></tr></thead>
+<tbody>{{range .Data}}<tr><td class="mono"><a href="/projects/{{$pid}}/prompts/{{.id}}">{{short .id}}</a></td><td class="mono">{{.state_key}}</td><td>v{{.template_version}}</td><td>{{.estimated_tokens}}</td><td>{{fmtTime .created_at}}</td></tr>
+{{else}}<tr><td colspan="5" class="muted">No prompts generated yet.</td></tr>{{end}}</tbody></table></div>
+<p class="muted">Historical prompts are read-only; content loads on the prompt page.</p>
+{{end}}

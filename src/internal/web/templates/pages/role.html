@@ -1,0 +1,35 @@
+{{define "title"}}Role {{.Data.Role.key}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}{{$rid := $d.Role.id}}
+<h1>Role {{$d.Role.key}}</h1>
+{{if .Conflict}}<div class="banner" role="alert"><strong>✗ Conflict — not saved</strong>{{.Message}} <a href="/projects/{{$pid}}/roles/{{$rid}}">Reload</a>; nothing was overwritten.</div>{{else}}{{with .Message}}<div class="banner" role="alert">{{.}}</div>{{end}}{{end}}
+<form method="post" action="/projects/{{$pid}}/roles/{{$rid}}" class="panel">
+{{template "csrf" .Shell.CSRF}}<input type="hidden" name="prompt_version" value="{{$d.Prompt.version}}">
+<h2>Configuration</h2>
+<div class="field"><label for="r-name">Name</label><input id="r-name" name="name" type="text" value="{{$d.Role.name}}" required maxlength="200"></div>
+<div class="field"><label for="r-desc">Description</label><input id="r-desc" name="description" type="text" value="{{$d.Role.description}}"></div>
+<div class="field"><label><input type="checkbox" name="enabled" value="on"{{if $d.Role.enabled}} checked{{end}}> Enabled</label></div>
+<div class="field"><label for="r-prompt">System prompt <span class="muted">(v{{$d.Prompt.version}})</span></label><textarea id="r-prompt" name="system_prompt" rows="10">{{$d.Prompt.content}}</textarea>{{template "fielderror" (index .Errors "system_prompt")}}</div>
+<div class="field"><label for="r-states">Allowed states <span class="muted">(comma separated)</span></label><input id="r-states" name="allowed_states" type="text" value="{{join $d.AllowedStates ", "}}"></div>
+<div class="field"><label for="r-files">Required state files <span class="muted">(comma separated)</span></label><input id="r-files" name="state_files" type="text" value="{{join $d.StateFiles ", "}}"></div>
+<button type="submit" data-pending="Saving…">Save role</button>
+<span class="hint">Saving creates new role / prompt versions; existing execution snapshots keep the versions they captured.</span>
+</form>
+<section class="panel"><h2>Instructions</h2>{{range $d.Instructions}}<p>{{.position}}. <span class="mono">{{.instruction_key}}</span></p>{{else}}<p class="muted">No instructions assigned.</p>{{end}}</section>
+<section class="panel"><h2>System prompt history</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Version</th><th scope="col">Hash</th><th scope="col">Content</th></tr></thead>
+<tbody>{{range $d.Versions}}<tr><td>v{{.version}}</td><td class="mono">{{short .content_hash}}</td><td><details><summary>View (read-only)</summary><pre>{{.content}}</pre></details></td></tr>{{end}}</tbody></table></div></section>
+<section class="panel"><h2>Set as default</h2>
+<p>Overwrites the global default for <span class="mono">{{$d.Role.key}}</span> with this role's saved name, description and system prompt (the global prompt gets a new version). Projects initialized afterwards start from it; existing projects keep their roles. Save the role first: unsaved edits above are not used.</p>
+<form method="post" action="/projects/{{$pid}}/roles/{{$rid}}/set-default">{{template "csrf" .Shell.CSRF}}
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> Replace the global default with this role.</label></div>
+<div class="field"><label>Reason <input type="text" name="reason" required maxlength="2000"></label></div>
+<button type="submit" class="danger" data-pending="Saving…">Set as default</button></form></section>
+<section class="panel"><h2>Reset role defaults</h2>
+<p>Copies the current global default for <span class="mono">{{$d.Role.key}}</span> into this project role as a new version.</p>
+<form method="post" action="/projects/{{$pid}}/roles/{{$rid}}/reset">{{template "csrf" .Shell.CSRF}}
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> Replace this role's configuration with the global default.</label></div>
+<div class="field"><label>Reason <input type="text" name="reason" required maxlength="2000"></label></div>
+<button type="submit" class="danger" data-pending="Resetting…">Reset role defaults</button></form></section>
+<p><a href="/projects/{{$pid}}/roles/{{$rid}}/preview">Preview the resolved role →</a></p>
+{{end}}

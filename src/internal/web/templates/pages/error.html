@@ -1,0 +1,14 @@
+{{define "title"}}Error {{.Data.Status}}{{end}}
+{{define "content"}}
+<h1>{{if eq .Data.Status 404}}Not found{{else if eq .Data.Status 409}}Conflict{{else if eq .Data.Status 403}}Not permitted{{else if ge .Data.Status 500}}Something went wrong{{else}}Request rejected{{end}}</h1>
+<section class="panel" role="alert">
+  <p>{{.Data.Message}}</p>
+  <dl class="facts">
+    <dt>Status</dt><dd>{{.Data.Status}}</dd>
+    {{with .Data.Code}}<dt>Code</dt><dd class="mono">{{.}}</dd>{{end}}
+    {{with .Data.RequestID}}<dt>Request ID</dt><dd class="mono">{{.}}</dd>{{end}}
+  </dl>
+  {{if .Data.Reload}}<p>The resource changed since it was loaded. Reload the page to see the current state; nothing was overwritten.</p>{{end}}
+  <p><a href="/">Back to the dashboard</a></p>
+</section>
+{{end}}

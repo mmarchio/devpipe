@@ -1,0 +1,14 @@
+{{define "title"}}Validation — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$pid := .Shell.Project.ID}}
+<h1>Validation history</h1>
+<p class="muted">Deterministic validation results. Failed attempts remain visible after a later PASS.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Run</th><th scope="col">Scope</th><th scope="col">Target</th><th scope="col">Attempt</th><th scope="col">Status</th><th scope="col">Commands</th><th scope="col">Started</th></tr></thead>
+<tbody>{{range .Data.Runs}}<tr><td><a href="/projects/{{$pid}}/validations/{{.ID}}">{{short .ID}}</a></td><td>{{.Scope}}</td>
+<td>{{if .UnitID}}<a href="/projects/{{$pid}}/work-units/{{.UnitID}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}</td><td>{{.Attempt}}</td><td>{{template "badge" .Status}}</td><td>{{.Commands}} ({{.Failed}} failed)</td><td>{{fmtTime .StartedAt}}</td></tr>
+{{else}}<tr><td colspan="7" class="muted">No validation runs.</td></tr>{{end}}</tbody></table></div>
+<h2>FIX attempts</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Attempt</th><th scope="col">Reason</th><th scope="col">Worker</th><th scope="col">Status</th><th scope="col">Created</th></tr></thead>
+<tbody>{{range .Data.Fixes}}<tr><td>Fix Attempt {{.Attempt}} / {{.Max}}</td><td>{{.Reason}}</td><td>{{if .Role}}{{.Role}}{{else}}—{{end}}</td><td>{{template "badge" .Status}}</td><td>{{fmtTime .CreatedAt}}</td></tr>
+{{else}}<tr><td colspan="5" class="muted">No fix attempts.</td></tr>{{end}}</tbody></table></div>
+{{end}}

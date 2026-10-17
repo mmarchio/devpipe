@@ -1,0 +1,39 @@
+{{define "title"}}Compressor — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}{{$s := $d.Settings}}{{$m := $d.Metrics}}
+<h1>Compressor</h1>
+<section class="panel"><h2>Compression Provider</h2>
+<dl class="facts">
+  <dt>Provider</dt><dd>{{with $s.provider}}{{.}}{{else}}—{{end}}</dd>
+  {{with $d.Provider}}<dt>Provider kind</dt><dd>{{.ProviderKind}}</dd>
+  <dt>Endpoint</dt><dd class="mono">{{if .EndpointHost}}{{.EndpointHost}}{{else}}—{{end}}</dd>
+  <dt>Credential</dt><dd>{{if .SecretRef}}{{if .SecretConfigured}}configured{{else}}missing ({{.SecretRef}}){{end}}{{else}}none{{end}}</dd>{{end}}
+  <dt>Model</dt><dd>{{with $s.model}}{{.}}{{else}}—{{end}}</dd>
+  <dt>Mode</dt><dd>{{with $s.mode}}{{template "badge" .}}{{else}}—{{end}}</dd>
+  <dt>Status</dt><dd>{{if $s.enabled}}enabled{{else}}disabled{{end}}</dd>
+  <dt>Validation mode</dt><dd>{{with $s.validation_mode}}{{.}}{{else}}—{{end}}</dd>
+  <dt>Target tokens</dt><dd>{{with $s.effective_target_tokens}}{{.}}{{else}}—{{end}}</dd>
+  <dt>Context window</dt><dd>{{with $s.context_window}}{{.}}{{else}}—{{end}}</dd>
+</dl>
+{{with $m}}<dl class="facts">
+  <dt>Runs</dt><dd>{{.Runs}}</dd><dt>Compressed</dt><dd>{{.Compressed}}</dd><dt>Bypassed</dt><dd>{{.Bypassed}}</dd>
+  <dt>Fallback</dt><dd>{{.Fallback}}</dd><dt>Failed</dt><dd>{{.Failed}}</dd><dt>Attempts</dt><dd>{{.Attempts}}</dd>
+  <dt>Average reduction</dt><dd>{{pct .AverageReduction}}</dd>
+</dl>{{end}}
+<p class="muted">Provider credentials are never displayed. <a href="/projects/{{$pid}}/config/compression">Compression configuration</a></p>
+</section>
+{{template "provider-test" (dict "Action" (print "/projects/" $pid "/compressor/test") "CSRF" .Shell.CSRF "Provider" $s.provider "Model" $s.model "Test" $d.Test)}}
+<section class="panel"><h2>Compression History</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Run</th><th scope="col">Prompt</th><th scope="col">Outcome</th><th scope="col">Model</th><th scope="col">Attempts</th><th scope="col">Tokens (canonical → target)</th><th scope="col">Reason</th><th scope="col">Created</th></tr></thead>
+<tbody>{{range $d.Runs}}<tr><td class="mono">{{short .ID}}</td><td><a href="/projects/{{$pid}}/prompts/{{.PromptID}}">{{short .PromptID}}</a></td>
+<td>{{template "badge" .Outcome}}</td><td>{{with .Model}}{{.}}{{else}}—{{end}}</td><td>{{.Attempts}}</td><td>{{.CanonicalTokens}} → {{.TargetTokens}}</td><td>{{with .Reason}}{{truncate . 120}}{{else}}—{{end}}</td><td>{{fmtTime .CreatedAt}}</td></tr>
+{{else}}<tr><td colspan="8" class="muted">No compression runs.</td></tr>{{end}}</tbody></table></div>
+{{template "pager" (dict "Page" $d.Page "Base" (print "/projects/" $pid "/compressor?"))}}
+</section>
+<section class="panel"><h2>Compression Attempts</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Attempt</th><th scope="col">Status</th><th scope="col">Model</th><th scope="col">Tokens (in / out)</th><th scope="col">Duration</th><th scope="col">Error</th><th scope="col">Created</th></tr></thead>
+<tbody>{{range $d.Attempts}}<tr><td class="mono">{{short .RunID}} #{{.Attempt}}</td><td>{{template "badge" .Status}}</td><td>{{with .Model}}{{.}}{{else}}—{{end}}</td>
+<td>{{.InputTokens}} / {{.OutputTokens}}</td><td>{{seconds .DurationMS}}</td><td>{{with .Error}}{{truncate . 160}}{{else}}—{{end}}</td><td>{{fmtTime .CreatedAt}}</td></tr>
+{{else}}<tr><td colspan="7" class="muted">No attempts.</td></tr>{{end}}</tbody></table></div>
+</section>
+{{end}}

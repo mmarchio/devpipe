@@ -1,0 +1,58 @@
+{{define "badge"}}<span class="badge {{statusKind .}}"><span aria-hidden="true">{{statusGlyph .}}</span> {{.}}</span>{{end}}
+
+{{define "progress"}}<div class="progress-block">
+  <label>WBS Progress
+  <progress max="{{.Total}}" value="{{.Done}}" aria-valuetext="{{.Label}} ({{pct .Percent}})">{{pct .Percent}}</progress></label>
+  <span class="pct">{{pct .Percent}}</span>
+  <div>{{.Label}}</div>
+</div>{{end}}
+
+{{define "meter"}}<div class="meter-block">
+  {{if .Known}}
+  <label>Worker Context
+  <meter min="0" max="{{.Window}}" value="{{.Used}}"{{if .ResetThreshold}} high="{{.ResetThreshold}}"{{end}}>{{pct .Percent}}</meter></label>
+  <span class="pct">{{pct .Percent}}</span>
+  <div>{{.Used}} / {{.Window}} tokens</div>
+  {{else}}<div>Worker Context: <span class="muted">unknown (no usage reported)</span></div>{{end}}
+  {{if .ResetThreshold}}<div>Reset threshold: <strong>{{pct .ResetThreshold}}</strong> <span class="muted">(from the execution configuration snapshot)</span></div>{{end}}
+</div>{{end}}
+
+{{define "pager"}}{{if or .Page.HasPrev .Page.HasNext}}<nav class="pager" aria-label="Pagination">
+  {{if .Page.HasPrev}}<a href="{{.Base}}offset={{.Page.PrevOffset}}&amp;limit={{.Page.Limit}}">← Previous</a>{{end}}
+  <span>{{add .Page.Offset 1}}–{{if .Page.HasNext}}{{.Page.NextOffset}}{{else}}{{.Page.Total}}{{end}} of {{.Page.Total}}</span>
+  {{if .Page.HasNext}}<a href="{{.Base}}offset={{.Page.NextOffset}}&amp;limit={{.Page.Limit}}">Next →</a>{{end}}
+</nav>{{else}}<p class="muted">{{.Page.Total}} total</p>{{end}}{{end}}
+
+{{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+
+{{define "fielderror"}}{{with .}}<div class="error" role="alert">{{.}}</div>{{end}}{{end}}
+
+{{define "flow"}}<div class="flow-wrap"><h3>{{.Name}}</h3><ol class="flow">{{range .Steps}}<li class="{{.State}}">{{.Label}} <span class="visually-hidden">({{.State}})</span>{{with .Detail}} — {{.}}{{end}}</li>{{end}}</ol></div>{{end}}
+
+{{define "control"}}<form class="inline" method="post" action="{{.Action}}">{{template "csrf" .CSRF}}
+  {{if .Confirm}}<label><input type="checkbox" name="confirm" value="yes" required> {{.Confirm}}</label>{{end}}
+  {{if .Reason}}<label>Reason <input type="text" name="reason" required maxlength="2000"></label>{{end}}
+  <button type="submit" class="{{.Class}}" data-pending="{{.Label}}…">{{.Label}}</button>
+</form>{{end}}
+
+{{define "timeline-rows"}}<div class="table-wrap"><table>
+<thead><tr><th scope="col">#</th><th scope="col">Time</th><th scope="col">Category</th><th scope="col">Event</th><th scope="col">Status</th><th scope="col">References</th></tr></thead>
+<tbody>{{range .}}<tr><td>{{.Seq}}</td><td>{{fmtTime .At}}</td><td>{{.Category}}</td><td>{{.Label}}</td><td>{{with .Status}}{{template "badge" .}}{{end}}</td>
+<td class="mono">{{range $k, $v := .Refs}}{{$k}}={{short $v}} {{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">No events.</td></tr>{{end}}</tbody></table></div>{{end}}
+
+{{define "metric-table"}}<div class="table-wrap"><table><tbody>{{range .}}<tr><th scope="row">{{.Name}}</th><td>{{if .Known}}{{.Value}} <span class="muted">{{.Unit}}</span>{{else}}<span class="muted">unknown</span>{{end}}</td></tr>{{end}}</tbody></table></div>{{end}}
+
+{{define "config-banner"}}{{if .Conflict}}<div class="banner" role="alert"><strong>✗ Conflict — not saved</strong>{{.Message}} Reload the page to see the current configuration; nothing was overwritten.</div>
+{{else}}{{with .Message}}<div class="banner" role="alert"><strong>Not saved.</strong>{{.}}</div>{{end}}{{end}}{{end}}
+
+{{define "provider-test"}}<section class="panel" id="connection-test"><h2>Test Connection</h2>
+<p class="muted">Sends “list your capabilities” to the configured model{{if .Provider}} ({{.Provider}}{{if .Model}} / {{.Model}}{{end}}){{end}}. A worker test uses a throwaway gateway session; the project's session is untouched.</p>
+<form method="post" action="{{.Action}}">{{template "csrf" .CSRF}}<button type="submit" data-pending="Testing…"{{if not (and .Provider .Model)}} disabled{{end}}>Test connection</button></form>
+{{with .Test}}<div role="status">
+<dl class="facts"><dt>Result</dt><dd>{{if .OK}}{{template "badge" "OK"}}{{else}}{{template "badge" "FAILED"}}{{end}}</dd>
+<dt>Provider</dt><dd>{{if .Provider}}{{.Provider}}{{else}}—{{end}}</dd><dt>Model</dt><dd>{{if .Model}}{{.Model}}{{else}}—{{end}}</dd>
+{{if .DurationMS}}<dt>Duration</dt><dd>{{seconds .DurationMS}}</dd>{{end}}</dl>
+{{if .OK}}<h3>Response</h3><pre>{{.Response}}</pre>{{else}}<div class="error" role="alert">{{.Error}}</div>{{end}}
+</div>{{end}}
+</section>{{end}}

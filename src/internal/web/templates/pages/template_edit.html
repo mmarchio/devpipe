@@ -1,0 +1,14 @@
+{{define "title"}}Template {{.Data.Template.key}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Template {{$d.Template.key}} <span class="muted">v{{$d.Template.current_version}}</span></h1>
+{{if .Conflict}}<div class="banner" role="alert"><strong>✗ Conflict — not saved</strong>{{.Message}} <a href="/projects/{{$pid}}/templates/{{$d.Template.id}}">Reload</a>.</div>{{else}}{{with .Message}}<div class="banner" role="alert"><strong>Not activated.</strong>{{.}}</div>{{end}}{{end}}
+<p>{{$d.Template.description}} · purpose {{$d.Template.purpose}} · scope {{$d.Template.scope}}</p>
+<form method="post" action="/projects/{{$pid}}/templates/{{$d.Template.id}}" class="panel">{{template "csrf" .Shell.CSRF}}
+<input type="hidden" name="expected_version" value="{{$d.Template.current_version}}">
+<div class="field"><label for="t-content">Content</label><textarea id="t-content" name="content" rows="20">{{if .Form}}{{index .Form "content"}}{{else}}{{$d.Template.content}}{{end}}</textarea>
+<div class="hint">Variables: {{range $d.Variables}}<code>{{"{{"}}{{.}}{{"}}"}}</code> {{end}}— unknown variables are rejected before activation.</div>
+{{template "fielderror" (index .Errors "content")}}</div>
+<button type="submit" data-pending="Saving…">Save new version</button></form>
+<section class="panel"><h2>Versions</h2>{{range $d.Versions}}<details><summary>v{{.version}} <span class="mono">{{short .content_hash}}</span> {{fmtTime .created_at}}</summary><pre>{{.content}}</pre></details>{{end}}</section>
+{{end}}

@@ -1,0 +1,47 @@
+{{define "title"}}Create project{{end}}
+{{define "content"}}
+<h1>Create project</h1>
+{{with .Message}}<div class="banner" role="alert"><strong>The project was not created.</strong>{{.}}</div>{{end}}
+<form method="post" action="/projects" novalidate>
+{{template "csrf" .Shell.CSRF}}
+<fieldset><legend>Project</legend>
+<div class="field"><label for="name">Name</label><input id="name" name="name" type="text" required maxlength="200" value="{{index .Form "name"}}" aria-describedby="name-err">
+<div id="name-err">{{template "fielderror" (index .Errors "name")}}</div></div>
+<div class="field"><label for="description">Description</label><input id="description" name="description" type="text" maxlength="4000" value="{{index .Form "description"}}">
+{{template "fielderror" (index .Errors "description")}}</div>
+<div class="field"><label for="working_directory">Working directory</label><input id="working_directory" name="working_directory" type="text" value="{{index .Form "working_directory"}}">
+<div class="hint">An existing directory on the overseer host. Displayed as data; never executed.</div>
+{{template "fielderror" (index .Errors "working_directory")}}</div>
+</fieldset>
+<fieldset><legend>Worker</legend>
+<div class="field"><label for="worker_provider">Worker provider</label>
+<select id="worker_provider" name="worker_provider"><option value="">Select…</option>
+{{range .Data.Workers}}<option value="{{.Name}}"{{if eq .Name (index $.Form "worker_provider")}} selected{{end}}>{{.Name}} ({{.ProviderKind}})</option>{{end}}</select>
+{{template "fielderror" (index .Errors "worker_provider")}}</div>
+<div class="field"><label for="worker_model">Worker model</label><input id="worker_model" name="worker_model" type="text" value="{{index .Form "worker_model"}}" data-model-provider="worker_provider" data-model-kind="worker">
+{{template "fielderror" (index .Errors "worker_model")}}</div>
+<div class="field"><label for="context_window">Context size (tokens)</label><input id="context_window" name="context_window" type="number" min="1" value="{{index .Form "context_window"}}">
+{{template "fielderror" (index .Errors "context_window")}}</div>
+<div class="field"><label for="context_threshold">Context reset threshold (%)</label><input id="context_threshold" name="context_threshold" type="number" min="1" max="100" step="0.1" value="{{index .Form "context_threshold"}}">
+{{template "fielderror" (index .Errors "context_threshold")}}</div>
+</fieldset>
+<fieldset><legend>Compression</legend>
+<div class="field"><label for="compression_provider">Compression provider</label>
+<select id="compression_provider" name="compression_provider"><option value="">None</option>
+{{range .Data.Compressors}}<option value="{{.Name}}"{{if eq .Name (index $.Form "compression_provider")}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+{{template "fielderror" (index .Errors "compression_provider")}}</div>
+<div class="field"><label for="compression_model">Compression model</label><input id="compression_model" name="compression_model" type="text" value="{{index .Form "compression_model"}}" data-model-provider="compression_provider" data-model-kind="compression">
+{{template "fielderror" (index .Errors "compression_model")}}</div>
+</fieldset>
+<fieldset><legend>Policies</legend>
+<div class="field"><label for="planning_mode">Planning policy</label>
+<select id="planning_mode" name="planning_mode">{{range .Data.Modes}}<option value="{{.}}"{{if eq . (index $.Form "planning_mode")}} selected{{end}}>{{.}}</option>{{end}}</select>
+<div class="hint">ATOMIC enables every atomic option; refine on the planning configuration page.</div>
+{{template "fielderror" (index .Errors "planning.mode")}}{{template "fielderror" (index .Errors "planning.custom_policy")}}</div>
+<div class="field"><label><input type="checkbox" name="use_git" value="yes"{{if eq (index .Form "use_git") "yes"}} checked{{end}}> Use git</label>
+<div class="hint">Commit a git checkpoint after each accepted task. The working directory must be a git repository. Off: no checkpoints.</div>
+{{template "fielderror" (index .Errors "checkpoint_policy")}}</div>
+</fieldset>
+<button type="submit" data-pending="Creating…">Create project</button>
+</form>
+{{end}}

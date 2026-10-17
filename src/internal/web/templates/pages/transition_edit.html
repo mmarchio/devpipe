@@ -1,0 +1,21 @@
+{{define "title"}}Transition{{end}}
+{{define "content"}}
+{{$t := .Data.Transition}}{{$pid := .Shell.Project.ID}}
+<h1>Transition {{$t.From}} → {{$t.To}}</h1>
+{{with .Message}}<div class="banner" role="alert"><strong>Not saved.</strong>{{.}}</div>{{end}}
+<form method="post" action="/projects/{{$pid}}/workflow/transitions/{{$t.ID}}" class="panel">
+{{template "csrf" .Shell.CSRF}}
+<div class="field"><label for="t-from">Source</label><input id="t-from" name="from" type="text" value="{{$t.From}}"></div>
+<div class="field"><label for="t-outcome">Outcome</label><input id="t-outcome" name="outcome" type="text" value="{{$t.Outcome}}"></div>
+<div class="field"><label for="t-to">Destination</label><input id="t-to" name="to" type="text" value="{{$t.To}}"></div>
+<div class="field"><label for="t-prio">Priority</label><input id="t-prio" name="priority" type="number" value="{{$t.Priority}}"></div>
+<fieldset><legend>Condition</legend>
+<div class="field"><label for="t-cf">Field</label><input id="t-cf" name="condition_field" type="text" value="{{with $t.Condition}}{{.Field}}{{end}}"></div>
+<div class="field"><label for="t-co">Operator</label><input id="t-co" name="condition_operator" type="text" value="{{with $t.Condition}}{{.Operator}}{{end}}"></div>
+<div class="field"><label for="t-cl">Literal</label><input id="t-cl" name="condition_literal" type="text" value="{{with $t.Condition}}{{with .Literal}}{{.}}{{end}}{{end}}"></div>
+</fieldset>
+{{template "fielderror" (index .Errors "transition")}}
+<button type="submit" data-pending="Saving…">Save transition</button>
+</form>
+<p class="muted">Ambiguous transitions are rejected by the backend.</p>
+{{end}}

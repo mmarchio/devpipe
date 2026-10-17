@@ -1,0 +1,1 @@
+{"protocol_version":"1.0","status":"blocked","summary":"Cannot build the module.","completed":[],"remaining":["Implementation"],"blocking":["dependency github.com/example/lib does not compile"],"next_action":""}

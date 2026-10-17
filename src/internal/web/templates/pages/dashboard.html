@@ -1,0 +1,31 @@
+{{define "title"}}Dashboard{{end}}
+{{define "content"}}
+<h1>Dashboard</h1>
+{{with .Data}}
+<section aria-labelledby="projects-h">
+<h2 id="projects-h">Projects</h2>
+<div class="cards">
+  <div class="card"><div class="value">{{.ProjectsTotal}}</div><div class="label"><a href="/projects">Projects</a></div></div>
+  <div class="card"><div class="value">{{.Running}}</div><div class="label"><a href="/projects?status=RUNNING">Running</a></div></div>
+  <div class="card"><div class="value">{{.Paused}}</div><div class="label"><a href="/projects?status=PAUSED">Paused</a></div></div>
+  <div class="card"><div class="value">{{.RecoveryRequired}}</div><div class="label"><a href="/projects?recovery=true">Recovery Required</a></div></div>
+  <div class="card"><div class="value">{{.Completed}}</div><div class="label"><a href="/projects?status=COMPLETED">Completed</a></div></div>
+  <div class="card"><div class="value">{{.Failed}}</div><div class="label"><a href="/projects?status=FAILED">Failed</a></div></div>
+</div>
+</section>
+<section aria-labelledby="activity-h">
+<h2 id="activity-h">Activity</h2>
+<div class="cards">
+  <div class="card"><div class="value">{{.ActiveExecutions}}</div><div class="label"><a href="/executions">Active Executions</a></div></div>
+  <div class="card"><div class="value">{{.ActiveDispatches}} / {{.ActiveSessions}}</div><div class="label">Worker Utilization (dispatches in flight / active sessions)</div></div>
+  <div class="card"><div class="value">{{.RunningValidations}}</div><div class="label">Validation Activity (running validations)</div></div>
+</div>
+</section>
+<section aria-labelledby="status-h">
+<h2 id="status-h">Projects by status</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Status</th><th scope="col">Projects</th></tr></thead>
+<tbody>{{range .ByStatus}}<tr><td>{{template "badge" .Status}}</td><td>{{.Count}}</td></tr>{{end}}</tbody></table></div>
+</section>
+{{end}}
+<p class="muted">All counts are computed by the backend read model.</p>
+{{end}}

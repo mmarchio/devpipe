@@ -1,0 +1,13 @@
+{{define "title"}}Cancel — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+<h1>Cancel project</h1>
+<div class="banner warn"><strong>! Dangerous action</strong>
+Cancellation stops autonomous execution permanently. Worker requests or repository operations that were already delivered may still need reconciliation; they are not undone by cancelling.</div>
+<form method="post" action="/projects/{{.Shell.Project.ID}}/cancel">
+{{template "csrf" .Shell.CSRF}}
+<div class="field"><label for="reason">Reason</label><input id="reason" type="text" name="reason" required maxlength="2000"></div>
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> I understand cancellation cannot be undone.</label></div>
+<button type="submit" class="danger" data-pending="Cancelling…">Cancel project</button>
+<a class="button secondary" href="/projects/{{.Shell.Project.ID}}">Keep running</a>
+</form>
+{{end}}

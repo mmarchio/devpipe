@@ -1,0 +1,16 @@
+{{define "title"}}Metrics — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$m := .Data}}
+<h1>Metrics</h1>
+<p class="muted">All metrics are aggregated by the backend from persisted telemetry; "unknown" means no data yet.</p>
+
+<div class="grid">
+<section class="panel"><h2>Execution</h2>{{template "metric-table" $m.Execution}}</section>
+<section class="panel"><h2>Context</h2>{{template "metric-table" $m.Context}}</section>
+<section class="panel"><h2>Planning</h2>{{template "metric-table" $m.Planning}}</section>
+<section class="panel"><h2>Prompt</h2>{{template "metric-table" $m.Prompt}}</section>
+</div>
+<h2>Phases</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Phase</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col">Units</th><th scope="col">Plan attempts</th><th scope="col">Continuations</th><th scope="col">Validation attempts</th><th scope="col">Fixes</th></tr></thead>
+<tbody>{{range $m.Phases}}<tr><td>{{.Order}} {{.Name}}</td><td>{{template "badge" .Status}}</td><td>{{.DurationSeconds}}s</td><td>{{.Units}}</td><td>{{.PlanAttempts}}</td><td>{{.Continuations}}</td><td>{{.ValidationAttempts}}</td><td>{{.Fixes}}</td></tr>{{end}}</tbody></table></div>
+{{end}}

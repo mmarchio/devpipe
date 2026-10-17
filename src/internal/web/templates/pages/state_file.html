@@ -1,0 +1,36 @@
+{{define "title"}}State file {{.Data.Entry.TypeKey}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}{{$fid := $d.Entry.ID}}
+<h1>{{$d.Entry.TypeKey}}</h1>
+{{if .Conflict}}<div class="banner" role="alert"><strong>✗ Conflict — not saved</strong>{{.Message}} <a href="/projects/{{$pid}}/state-files/{{$fid}}">Reload</a>.</div>{{else}}{{with .Message}}<div class="banner" role="alert">{{.}}</div>{{end}}{{end}}
+<section class="panel"><dl class="facts">
+  <dt>Type</dt><dd class="mono">{{$d.Entry.TypeKey}}</dd><dt>Scope</dt><dd>{{$d.Entry.Scope}}</dd><dt>Source</dt><dd>{{$d.Entry.Source}}</dd>
+  <dt>Version</dt><dd>v{{$d.Current.Version}}</dd><dt>Hash</dt><dd class="mono">{{$d.Current.Hash}}</dd>
+  <dt>Size</dt><dd>{{bytes $d.Current.Size}}</dd><dt>Token estimate</dt><dd>{{$d.Current.TokenEstimate}}</dd>
+  <dt>Materialization</dt><dd>{{with $d.Drift}}{{if .path}}<span class="mono">{{.path}}</span>{{else}}not materialized{{end}}{{end}}</dd>
+  <dt>Drift</dt><dd>{{with $d.Drift}}{{template "badge" .status}}{{if .ignored}} — IGNORED (acknowledged{{with .ignored_by}} by {{.}}{{end}}){{end}}{{end}}</dd>
+</dl></section>
+{{with $d.Drift}}{{if eq .status "DRIFTED"}}<section class="banner warn" aria-labelledby="drift-h"><strong id="drift-h">! {{$d.Entry.TypeKey}} — DRIFT DETECTED</strong>
+Database: v{{.current_version}} · Filesystem differs{{if .ignored}} (ignored for this filesystem version){{end}}</section>{{end}}
+{{if .options}}<section class="panel"><h2>Drift resolution</h2>
+{{range .options}}<form method="post" action="/projects/{{$pid}}/state-files/{{$fid}}/drift" class="panel">{{template "csrf" $.Shell.CSRF}}
+<input type="hidden" name="option" value="{{.}}">
+{{if eq . "RESTORE"}}<h3>Restore Managed Version</h3><p>Overwrite the filesystem copy with database v{{$d.Current.Version}}.</p>{{end}}
+{{if eq . "IMPORT"}}<h3>Import Filesystem Version</h3><p>Store the filesystem content as a new version.</p>
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> Import the filesystem content as authoritative.</label></div>
+<div class="field"><label>Reason <input type="text" name="reason" required maxlength="2000"></label></div>{{end}}
+{{if eq . "IGNORE"}}<h3>Ignore</h3><p>Acknowledge this filesystem version; a later change raises drift again.</p><div class="field"><label>Reason <input type="text" name="reason" maxlength="2000"></label></div>{{end}}
+<button type="submit" data-pending="Working…">{{if eq . "RESTORE"}}Restore Managed Version{{else if eq . "IMPORT"}}Import Filesystem Version{{else}}Ignore{{end}}</button></form>{{end}}
+{{if eq $d.Entry.Source "DERIVED"}}<p class="muted">Derived files cannot import filesystem content.</p>{{end}}
+</section>{{end}}{{end}}
+{{if $d.Editable}}<form method="post" action="/projects/{{$pid}}/state-files/{{$fid}}" class="panel">{{template "csrf" .Shell.CSRF}}
+<h2>Edit</h2><input type="hidden" name="expected_version" value="{{$d.Current.Version}}">
+<textarea name="content" rows="18" aria-label="State file content">{{if .Conflict}}{{index .Form "content"}}{{else}}{{$d.Current.Content}}{{end}}</textarea>
+{{template "fielderror" (index .Errors "content")}}
+<button type="submit" data-pending="Saving…">Save as new version</button></form>
+{{else}}<section class="panel"><h2>Content <span class="muted">(read-only: {{$d.Entry.Source}} files are produced by the overseer)</span></h2><pre>{{$d.Current.Content}}</pre></section>{{end}}
+<section class="panel"><h2>History</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Version</th><th scope="col">Hash</th></tr></thead>
+<tbody>{{range $d.Versions}}<tr><td>v{{.version}}</td><td class="mono">{{.hash}}</td></tr>{{end}}</tbody></table></div>
+<p class="muted">Historical versions are immutable.</p></section>
+{{end}}

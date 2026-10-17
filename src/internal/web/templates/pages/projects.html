@@ -1,0 +1,35 @@
+{{define "title"}}Projects{{end}}
+{{define "content"}}
+<h1>Projects</h1>
+<div class="actions"><a class="button" href="/projects/new">Create project</a></div>
+<form class="filters" method="get" action="/projects" role="search" aria-label="Filter projects">
+  <div class="field"><label for="f-status">Status</label>
+    <select id="f-status" name="status"><option value="">Any</option>
+    {{range $s := .Data.Statuses}}<option value="{{$s}}"{{if eq $s $.Data.Status}} selected{{end}}>{{$s}}</option>{{end}}</select></div>
+  <div class="field"><label for="f-name">Name</label><input id="f-name" type="search" name="name" value="{{.Data.Name}}" maxlength="256"></div>
+  <div class="field"><label for="f-active">Execution</label>
+    <select id="f-active" name="active"><option value="">Any</option>
+      <option value="active"{{if eq .Data.Active "active"}} selected{{end}}>Active</option>
+      <option value="inactive"{{if eq .Data.Active "inactive"}} selected{{end}}>Inactive</option></select></div>
+  <div class="field"><label><input type="checkbox" name="recovery" value="true"{{if .Data.Recovery}} checked{{end}}> Recovery required</label></div>
+  <div class="field"><button type="submit">Filter</button></div>
+</form>
+{{with .Data.List}}
+<div class="table-wrap"><table>
+<caption class="visually-hidden">Projects</caption>
+<thead><tr><th scope="col">Project</th><th scope="col">Status</th><th scope="col">Current Phase</th><th scope="col">WBS Progress</th><th scope="col">Current State</th><th scope="col">Current Task</th><th scope="col">Last Activity</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+<tbody>
+{{range .Rows}}<tr>
+  <td><a href="/projects/{{.ID}}">{{.Name}}</a>{{if .Recovery}} {{template "badge" "RECOVERY_REQUIRED"}}{{end}}</td>
+  <td>{{template "badge" .Status}}</td>
+  <td>{{if .CurrentPhase}}{{.CurrentPhase}} {{template "badge" .PhaseStatus}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td>{{pct .Progress.Percent}} <span class="muted">({{.Progress.Done}} / {{.Progress.Total}})</span></td>
+  <td class="mono">{{if .CurrentState}}{{.CurrentState}}{{else}}—{{end}}</td>
+  <td>{{if .CurrentTask}}{{.CurrentTask}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td>{{fmtTime .LastActivity}}</td>
+  <td>{{if .Deletable}}<a class="button danger" href="/projects/{{.ID}}/delete" aria-label="Delete {{.Name}}">Delete</a>{{else}}<span class="muted" title="Cancel the project before deleting it">Delete unavailable ({{.Status}})</span>{{end}}</td>
+</tr>{{else}}<tr><td colspan="8" class="muted">No projects match.</td></tr>{{end}}
+</tbody></table></div>
+{{template "pager" (dict "Page" .Page "Base" $.Data.PagerBase)}}
+{{end}}
+{{end}}

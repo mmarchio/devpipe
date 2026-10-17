@@ -1,0 +1,10 @@
+{{define "frag-units"}}<div class="table-wrap"><table>
+<caption class="visually-hidden">Work units</caption>
+<thead><tr><th scope="col">ID</th><th scope="col">Kind</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Dependencies</th><th scope="col">Attempts</th><th scope="col">Validation</th><th scope="col">Checkpoint</th></tr></thead>
+<tbody>{{$pid := .ProjectID}}{{range .Rows}}<tr{{if .Current}} class="current" aria-current="true"{{end}}>
+<td><a href="/projects/{{$pid}}/work-units/{{.ID}}">{{.Key}}</a>{{if .Current}} <strong>CURRENT</strong>{{end}}</td>
+<td>{{.Kind}}</td><td>{{.Name}}</td>
+<td>{{template "badge" .Status}}{{if ne (print .Stage) .Status}} <span class="muted">stage {{.Stage}}</span>{{end}}</td>
+<td>{{.Readiness}}{{if .Deps}}<div class="muted">depends on {{join .Deps ", "}}</div>{{end}}</td>
+<td>{{.Attempts}}</td><td>{{with .Validation}}{{template "badge" .}}{{else}}—{{end}}</td><td>{{with .Checkpoint}}{{template "badge" .}}{{else}}—{{end}}</td>
+</tr>{{else}}<tr><td colspan="8" class="muted">No work units{{if not .Plan}} — the phase is not planned yet{{end}}.</td></tr>{{end}}</tbody></table></div>{{end}}

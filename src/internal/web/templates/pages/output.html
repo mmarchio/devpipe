@@ -1,0 +1,8 @@
+{{define "title"}}Validation output{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{$d.Stream}} — characters {{$d.Offset}}–{{$d.End}} of {{$d.Total}}</h1>
+<pre>{{$d.Text}}</pre>
+<p>{{if not $d.Complete}}<a href="?stream={{$d.Stream}}&amp;offset={{$d.End}}">Next range →</a>{{else}}End of output.{{end}}
+ · <a href="/projects/{{.Shell.Project.ID}}/validations/{{$d.RunID}}">Back to the run</a></p>
+{{end}}

@@ -1,0 +1,7 @@
+{{define "title"}}Cache entry{{end}}
+{{define "content"}}
+<h1>Cache entry {{short .Data.id}}</h1>
+<section class="panel"><dl class="facts">{{range $k, $v := .Data}}{{if ne $k "metadata"}}<dt class="mono">{{$k}}</dt><dd class="mono">{{$v}}</dd>{{end}}{{end}}</dl></section>
+<section class="panel"><h2>Semantic key inputs</h2><dl class="facts">{{range $k, $v := .Data.metadata}}<dt class="mono">{{$k}}</dt><dd class="mono">{{$v}}</dd>{{end}}</dl>
+<p class="muted">Credentials are never part of cache keys or this view.</p></section>
+{{end}}

@@ -1,0 +1,19 @@
+{{define "title"}}Delete — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+<h1>Delete project</h1>
+{{if .Data.Deletable}}
+<div class="banner"><strong>✗ Permanent deletion</strong>
+Deleting <strong>{{.Shell.Project.Name}}</strong> removes the project and everything it owns: phases, WBS documents and plans, work units, roles, workflow configuration, state files, prompts, executions, worker history and recovery records. It cannot be undone. The audit log keeps its entries for this project. Files in the working directory are not touched.</div>
+<form method="post" action="/projects/{{.Shell.Project.ID}}/delete">
+{{template "csrf" .Shell.CSRF}}
+<div class="field"><label for="reason">Reason</label><input id="reason" type="text" name="reason" required maxlength="2000"></div>
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> I understand this project and all of its data will be permanently deleted.</label></div>
+<button type="submit" class="danger" data-pending="Deleting…">Delete project</button>
+<a class="button secondary" href="/projects">Keep project</a>
+</form>
+{{else}}
+<div class="banner warn"><strong>! Cannot delete</strong>
+This project is {{.Data.Status}}. Running and paused projects cannot be deleted; cancel the project first.</div>
+<div class="actions"><a class="button" href="/projects/{{.Shell.Project.ID}}/cancel">Cancel project</a> <a class="button secondary" href="/projects">Back to projects</a></div>
+{{end}}
+{{end}}

@@ -1,0 +1,30 @@
+{{define "title"}}Validation run{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Validation run {{short $d.Run.ID}}</h1>
+<section class="panel"><dl class="facts">
+  <dt>Scope</dt><dd>{{$d.Run.Scope}}</dd><dt>Target</dt><dd>{{$d.Run.Label}}</dd><dt>Attempt</dt><dd>{{$d.Run.Attempt}}</dd>
+  <dt>Overall</dt><dd>{{template "badge" $d.Run.Overall}}</dd><dt>Working directory</dt><dd class="mono">{{$d.Run.CWD}}</dd>
+  <dt>Started</dt><dd>{{fmtTime $d.Run.StartedAt}}</dd><dt>Finished</dt><dd>{{fmtTime $d.Run.FinishedAt}}</dd>
+</dl></section>
+<h2>Work Unit Validation</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Command</th><th scope="col">Result</th></tr></thead><tbody>
+{{range $d.Commands}}<tr><td>{{if .Name}}{{.Name}}{{else}}TEST-{{.Ord}}{{end}}</td><td>{{template "badge" .Outcome}}</td></tr>{{end}}
+<tr><th scope="row">Overall</th><td>{{template "badge" $d.Run.Overall}}</td></tr></tbody></table></div>
+{{with $d.Run.Acceptance}}<h2>Acceptance Criteria</h2><ul>{{range .}}<li><span aria-hidden="true">{{.Symbol}}</span> AC-{{add .Index 1}} {{.Text}} — <strong>{{.Label}}</strong></li>{{end}}</ul>{{end}}
+{{range $d.Commands}}<section class="panel" id="cmd-{{.Ord}}"><h2>{{.Ord}}. {{if .Name}}{{.Name}}{{else}}command{{end}} {{template "badge" .Outcome}}</h2>
+<dl class="facts">
+  <dt>Executable</dt><dd class="mono">{{.Executable}}</dd>
+  <dt>Arguments</dt><dd class="mono">{{range .Args}}<code>{{.}}</code> {{else}}—{{end}}</dd>
+  <dt>Exit code</dt><dd>{{with .ExitCode}}{{deref .}}{{else}}none{{end}}</dd>
+  <dt>Duration</dt><dd>{{seconds .DurationMS}}</dd>
+  <dt>Timeout</dt><dd>{{seconds .TimeoutMS}}{{if .TimedOut}} — {{template "badge" "TIMED OUT"}}{{end}}</dd>
+  {{with .InfraReason}}<dt>Infrastructure</dt><dd>{{.}}</dd>{{end}}
+</dl>
+<h3>Stdout <span class="muted">({{bytes .StdoutLen}} characters)</span></h3><pre>{{.StdoutHead}}</pre>
+{{if gt .StdoutLen .StdoutNext}}<p><a href="/projects/{{$pid}}/validations/{{$d.Run.ID}}/output/{{.ID}}?stream=stdout&amp;offset={{.StdoutNext}}">Load more stdout →</a></p>{{end}}
+<h3>Stderr <span class="muted">({{bytes .StderrLen}} characters)</span></h3><pre>{{.StderrHead}}</pre>
+{{if gt .StderrLen .StderrNext}}<p><a href="/projects/{{$pid}}/validations/{{$d.Run.ID}}/output/{{.ID}}?stream=stderr&amp;offset={{.StderrNext}}">Load more stderr →</a></p>{{end}}
+</section>{{end}}
+<p class="muted">Commands are displayed as data; this page cannot execute anything.</p>
+{{end}}

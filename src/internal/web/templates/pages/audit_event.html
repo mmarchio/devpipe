@@ -1,0 +1,16 @@
+{{define "title"}}Audit event{{end}}
+{{define "content"}}
+{{$e := .Data}}
+<h1>Audit event {{short $e.ID}}</h1>
+<section class="panel"><dl class="facts">
+<dt>Timestamp</dt><dd>{{fmtTime $e.At}}</dd><dt>Actor</dt><dd>{{$e.ActorName}} ({{$e.ActorType}}, <span class="mono">{{$e.ActorID}}</span>)</dd>
+<dt>Action</dt><dd>{{$e.Action}}</dd><dt>Result</dt><dd>{{template "badge" $e.Result}} (HTTP {{$e.HTTPStatus}})</dd>
+<dt>Resource</dt><dd class="mono">{{$e.ResourceKind}} {{$e.ResourceID}}</dd>
+<dt>Project</dt><dd>{{if $e.ProjectID}}<a href="/projects/{{$e.ProjectID}}">{{$e.ProjectName}}</a>{{else}}—{{end}}</dd>
+<dt>Execution</dt><dd class="mono">{{if $e.ExecutionID}}{{$e.ExecutionID}}{{else}}—{{end}}</dd>
+<dt>Reason</dt><dd>{{if $e.Reason}}{{$e.Reason}}{{else}}—{{end}}</dd>
+<dt>Request</dt><dd class="mono">{{$e.Method}} {{$e.Path}} · {{$e.RequestID}}</dd>
+</dl></section>
+<section class="panel"><h2>Metadata</h2><dl class="facts">{{range $k, $v := $e.Metadata}}<dt class="mono">{{$k}}</dt><dd class="mono">{{$v}}</dd>{{end}}</dl>
+<p class="muted">Secrets and prompt content are not recorded in audit metadata.</p></section>
+{{end}}

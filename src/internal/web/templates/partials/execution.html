@@ -1,0 +1,13 @@
+{{define "frag-timeline"}}<section class="panel" aria-labelledby="tl-h"><h2 id="tl-h">Execution Timeline</h2>
+{{template "timeline-rows" .Rows}}
+{{if .NextBefore}}<p><a href="?before={{.NextBefore}}{{range .Categories}}&amp;category={{.}}{{end}}">Older events →</a></p>{{end}}
+</section>{{end}}
+
+{{define "frag-recovery"}}{{with .}}{{if .Required}}<section class="banner" role="alert" aria-labelledby="rec-h">
+<strong id="rec-h">✗ RECOVERY REQUIRED</strong>
+<dl class="facts">
+  <dt>Reason</dt><dd>{{.Reason}}</dd>
+  {{with .AffectedUnit}}<dt>Affected Unit</dt><dd>{{.Key}} {{.Name}} ({{.Status}})</dd>{{end}}
+  <dt>Repository</dt><dd>{{with .RepositoryChanged}}{{if deref .}}Modified since the execution baseline{{else}}Unchanged since the execution baseline{{end}}{{else}}Unknown{{end}}</dd>
+  <dt>Automatic execution</dt><dd>{{if .AutomaticStopped}}STOPPED{{else}}running{{end}}</dd>
+</dl></section>{{else}}<p class="muted">No recovery required (execution {{.ExecutionStatus}}).</p>{{end}}{{end}}{{end}}

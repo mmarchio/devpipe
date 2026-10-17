@@ -1,0 +1,15 @@
+{{define "title"}}Prompt cache{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Prompt cache</h1>
+{{with $d.Stats}}<div class="cards">
+<div class="card"><div class="value">{{.hits}}</div><div class="label">Hits</div></div>
+<div class="card"><div class="value">{{.misses}}</div><div class="label">Misses</div></div>
+<div class="card"><div class="value">{{.entries}}</div><div class="label">Entries</div></div>
+<div class="card"><div class="value">{{.invalidated}}</div><div class="label">Invalidations</div></div>
+<div class="card"><div class="value">{{$d.Evictions}}</div><div class="label">Evictions (garbage collected)</div></div>
+</div>{{end}}
+<h2>Entries</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Entry</th><th scope="col">Layer</th><th scope="col">Status</th><th scope="col">State</th><th scope="col">Hits</th><th scope="col">Last used</th></tr></thead>
+<tbody>{{range $d.Entries}}<tr><td><a href="/projects/{{$pid}}/cache/{{.id}}" class="mono">{{short .id}}</a></td><td>{{.layer}}</td><td>{{template "badge" .status}}</td><td class="mono">{{.state_key}}</td><td>{{.hit_count}}</td><td>{{fmtTime .last_used_at}}</td></tr>{{end}}</tbody></table></div>
+{{end}}

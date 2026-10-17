@@ -1,0 +1,1 @@
+{"protocol_version":"1.0","status":"failed","summary":"The repository became unusable after a failed migration.","completed":[],"remaining":[],"blocking":["git index corrupted"],"next_action":"Restore the repository."}

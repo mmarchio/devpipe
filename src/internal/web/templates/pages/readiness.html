@@ -1,0 +1,25 @@
+{{define "title"}}Readiness — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+<h1>Execution Readiness</h1>
+{{if eq .Shell.Project.Status "DRAFT"}}<section class="panel"><h2>Project configuration</h2>
+<p>The project is a DRAFT. Marking it READY runs the project readiness checks (settings, phases, WBS) on the server.</p>
+<form method="post" action="/projects/{{.Shell.Project.ID}}/ready">{{template "csrf" .Shell.CSRF}}<button type="submit" data-pending="Checking…">Mark project READY</button></form>
+</section>{{end}}
+{{with .Message}}<div class="banner" role="alert"><strong>Not ready.</strong>{{.}}</div>{{end}}
+<ol class="flow" aria-label="Readiness to execution flow"><li class="DONE"><a href="/projects/{{.Shell.Project.ID}}/config">Project Configuration</a></li><li class="ACTIVE">Readiness</li><li class="PENDING">Bootstrap Preview</li><li class="PENDING">Start</li><li class="PENDING">Execution</li></ol>
+{{with .Data.View}}
+<section class="panel">
+<div class="table-wrap"><table><thead><tr><th scope="col">Check</th><th scope="col">Result</th><th scope="col">Problems</th></tr></thead>
+<tbody>{{range .checks}}<tr><td>{{.label}}</td><td>{{if .ok}}{{template "badge" "PASS"}}{{else}}{{template "badge" "FAIL"}}{{end}}</td>
+<td>{{range .messages}}<div>{{.}}</div>{{end}}</td></tr>{{end}}</tbody></table></div>
+<p><strong>{{if .ready}}{{template "badge" "READY"}}{{else}}{{template "badge" "NOT_READY"}}{{end}} {{.headline}}</strong></p>
+{{if .issues}}<h2>Not Ready</h2><ul>{{range .issues}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{if .warnings}}<h3>Warnings</h3><ul>{{range .warnings}}<li>{{.}}</li>{{end}}</ul>{{end}}
+</section>
+<div class="actions">
+<a class="button secondary" href="/projects/{{$.Shell.Project.ID}}/readiness">Refresh readiness</a>
+{{if .ready}}<a class="button" href="/projects/{{$.Shell.Project.ID}}/start">Review bootstrap preview →</a>{{end}}
+</div>
+{{end}}
+<p class="muted">Readiness is evaluated by the backend; every failure is listed.</p>
+{{end}}

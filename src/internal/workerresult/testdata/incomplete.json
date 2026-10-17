@@ -1,0 +1,9 @@
+{
+  "protocol_version": "1.0",
+  "status": "incomplete",
+  "summary": "Implemented parser and persistence.",
+  "completed": ["Parser", "Persistence"],
+  "remaining": ["HTTP handlers", "Handler tests"],
+  "blocking": [],
+  "next_action": "Implement HTTP handlers."
+}

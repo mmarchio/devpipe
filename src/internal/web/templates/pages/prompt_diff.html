@@ -1,0 +1,6 @@
+{{define "title"}}Prompt diff{{end}}
+{{define "content"}}
+<h1>Canonical vs compressed</h1>
+<p class="muted">A read-only comparison; neither artifact is modified.</p>
+<section class="panel diff">{{range $k, $v := .Data}}<h3 class="mono">{{$k}}</h3><pre>{{$v}}</pre>{{end}}</section>
+{{end}}

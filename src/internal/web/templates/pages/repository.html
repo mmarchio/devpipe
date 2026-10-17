@@ -1,0 +1,22 @@
+{{define "title"}}Repository — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$r := .Data.Status}}{{$pid := .Shell.Project.ID}}
+<h1>Repository status</h1>
+<p class="muted">Observational only: this page never modifies the repository.</p>
+<section class="panel">{{if $r.Available}}<dl class="facts">
+  <dt>Branch</dt><dd class="mono">{{if $r.Branch}}{{$r.Branch}}{{else}}(detached){{end}}</dd>
+  <dt>HEAD</dt><dd class="mono">{{$r.Head}}</dd>
+  <dt>Working tree</dt><dd>{{if $r.Dirty}}{{template "badge" "DIRTY"}} dirty{{else}}{{template "badge" "CLEAN"}} clean{{end}}</dd>
+  <dt>Baseline</dt><dd class="mono">{{if $r.BaselineHead}}{{$r.BaselineHead}}{{if $r.BaselineDirty}} (dirty at execution start){{end}}{{else}}—{{end}}</dd>
+  <dt>Latest checkpoint</dt><dd>{{with $r.LatestCheckpoint}}<a href="/projects/{{$pid}}/checkpoints/{{.ID}}">{{.Kind}} {{.ShortCommit}}</a> {{template "badge" .Status}}{{else}}—{{end}}</dd>
+</dl>{{else}}<p>{{$r.Error}}</p>{{end}}</section>
+<div class="grid">
+<section class="panel"><h2>Pre-existing changes</h2>{{range $r.PreExistingChanges}}<div class="mono">{{.}}</div>{{else}}<p class="muted">None{{if not $r.ChangesTracked}} attributable{{end}}.</p>{{end}}
+{{if and $r.BaselineDirty (not $r.ChangesTracked)}}<p class="muted">The repository was dirty when the execution started; per-file attribution is not tracked, so current changes are listed here and not presented as worker changes.</p>{{end}}</section>
+<section class="panel"><h2>Overseer-era changes</h2>{{range $r.OverseerChanges}}<div class="mono">{{.}}</div>{{else}}<p class="muted">None.</p>{{end}}</section>
+</div>
+<h2>Checkpoints</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Kind</th><th scope="col">Status</th><th scope="col">Commit</th><th scope="col">Policy</th><th scope="col">Created</th></tr></thead>
+<tbody>{{range .Data.Checkpoints}}<tr><td><a href="/projects/{{$pid}}/checkpoints/{{.ID}}">{{.Kind}}</a></td><td>{{template "badge" .Status}}</td><td class="mono">{{.ShortCommit}}</td><td>{{.Policy}}</td><td>{{fmtTime .CreatedAt}}</td></tr>
+{{else}}<tr><td colspan="5" class="muted">No checkpoints.</td></tr>{{end}}</tbody></table></div>
+{{end}}

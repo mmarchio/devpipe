@@ -1,0 +1,32 @@
+{{define "title"}}Start — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+<h1>Start Project</h1>
+<ol class="flow"><li class="DONE">Project Configuration</li><li class="DONE"><a href="/projects/{{.Shell.Project.ID}}/readiness">Readiness</a></li><li class="ACTIVE">Bootstrap Preview</li><li class="PENDING">Start</li><li class="PENDING">Execution</li></ol>
+{{with .Message}}<div class="banner" role="alert"><strong>The project was not started.</strong>{{.}}</div>{{end}}
+{{with .Data}}
+<section class="panel"><h2>Start confirmation</h2>
+<p class="preview-label">PREVIEW — NOTHING STARTED YET</p>
+<dl class="facts">
+  <dt>Working Directory</dt><dd class="mono">{{.Preview.working_directory}}</dd>
+  <dt>Current Phase</dt><dd>{{.Preview.initial_phase}}</dd>
+  <dt>Worker</dt><dd>{{.Worker}}</dd>
+  <dt>Model</dt><dd>{{.Model}}</dd>
+  <dt>Checkpoint Policy</dt><dd>{{.Checkpoint}}</dd>
+  <dt>Planning Policy</dt><dd>{{.Planning}}</dd>
+  <dt>Execution Plan</dt><dd>{{.Preview.execution_plan}}</dd>
+  <dt>Initial State</dt><dd class="mono">{{.Preview.initial_state}} → {{.Preview.first_actionable_state}}</dd>
+  <dt>Role</dt><dd>{{.Preview.role}}</dd>
+  <dt>Readiness</dt><dd>{{.Preview.readiness}}</dd>
+  <dt>Plan hash</dt><dd class="mono">{{.Preview.plan_hash}}</dd>
+</dl>
+{{with .Preview.steps}}<h3>Bootstrap steps</h3><ol>{{range .}}<li>{{.}}</li>{{end}}</ol>{{end}}
+</section>
+{{if .Ready}}
+<form method="post" action="/projects/{{$.Shell.Project.ID}}/start">
+{{template "csrf" $.Shell.CSRF}}
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> I reviewed these parameters; start autonomous execution.</label></div>
+<button type="submit" data-pending="Starting…">Start Project</button>
+</form>
+{{else}}<div class="banner warn"><strong>! Not ready</strong>Resolve the <a href="/projects/{{$.Shell.Project.ID}}/readiness">readiness failures</a> first.</div>{{end}}
+{{end}}
+{{end}}

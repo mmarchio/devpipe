@@ -1,0 +1,12 @@
+{{define "title"}}Precomputation{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<h1>Precomputation</h1>
+<div class="banner info"><strong>SPECULATIVE</strong>Precomputed prompts are speculative; only dispatched prompts (worker history) are authoritative.</div>
+<div class="cards">
+{{range $d.Counts}}<div class="card"><div class="value">{{.Count}}</div><div class="label">{{.Status}}</div></div>{{end}}
+</div>
+<h2>Jobs</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Job</th><th scope="col">Status</th><th scope="col">Trigger</th><th scope="col">Created</th></tr></thead>
+<tbody>{{range $d.Jobs}}<tr><td class="mono">{{short .id}}</td><td>{{template "badge" .status}}</td><td>{{.trigger}}</td><td>{{fmtTime .created_at}}</td></tr>{{else}}<tr><td colspan="4" class="muted">No jobs.</td></tr>{{end}}</tbody></table></div>
+{{end}}

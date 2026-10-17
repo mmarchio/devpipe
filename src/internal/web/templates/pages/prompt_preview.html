@@ -1,0 +1,16 @@
+{{define "title"}}Prompt preview{{end}}
+{{define "content"}}
+{{$pid := .Shell.Project.ID}}
+<h1>Prompt preview</h1>
+<form method="post" action="/projects/{{$pid}}/prompts/preview" class="panel">{{template "csrf" .Shell.CSRF}}
+<p>Previews the canonical prompt for the project's current runtime state and work unit.</p>
+<div class="field"><label for="pp-t">Template ID (optional)</label><input id="pp-t" name="template_id" type="text" value="{{index .Form "template_id"}}"></div>
+<div class="field"><label for="pp-v">Template version (optional)</label><input id="pp-v" name="template_version" type="number" min="0" value="{{index .Form "template_version"}}"></div>
+<button type="submit" data-pending="Previewing…">Preview</button></form>
+{{with .Message}}<div class="banner" role="alert">{{.}}</div>{{end}}
+{{with .Data}}<section class="panel"><p class="preview-label">PREVIEW — NOT DISPATCHED</p>
+<dl class="facts"><dt>State</dt><dd class="mono">{{.state}}</dd><dt>Role</dt><dd>{{.role}}</dd><dt>Template</dt><dd>v{{.template_version}}</dd><dt>Tokens</dt><dd>{{.estimated_tokens}}</dd><dt>Hash</dt><dd class="mono">{{.hash}}</dd></dl>
+{{with .missing_required}}<p>Missing required: {{range .}}<span class="mono">{{.}}</span> {{end}}</p>{{end}}
+<h3>Sections</h3><ul>{{range .components}}<li>{{title .type}} — source <span class="mono">{{short .source_id}}</span> v{{.source_version}} ({{.token_estimate}} tokens)</li>{{end}}</ul>
+<pre>{{.content}}</pre></section>{{end}}
+{{end}}

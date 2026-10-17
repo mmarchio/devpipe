@@ -1,0 +1,20 @@
+{{define "title"}}Prompt {{short .Data.Prompt.id}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$p := $d.Prompt}}
+<h1>Canonical prompt {{short $p.id}}</h1>
+<section class="panel"><dl class="facts"><dt>State</dt><dd class="mono">{{$p.state_key}}</dd><dt>Hash</dt><dd class="mono">{{$p.hash}}</dd><dt>Tokens</dt><dd>{{$p.estimated_tokens}}</dd>
+<dt>Template</dt><dd>v{{$p.template_version}}</dd><dt>Role</dt><dd>v{{$p.role_version}}</dd><dt>Workflow</dt><dd>v{{$p.state_machine_version}}</dd><dt>Created</dt><dd>{{fmtTime $p.created_at}}</dd></dl></section>
+<section class="panel"><h2>Provenance</h2><div class="table-wrap"><table><thead><tr><th scope="col">Section</th><th scope="col">Source</th><th scope="col">Version</th><th scope="col">Hash</th></tr></thead>
+<tbody>{{range $d.Provenance}}<tr><td>{{title .component_type}}</td><td class="mono">{{short .source_id}}</td><td>v{{.source_version}}</td><td class="mono">{{short .source_hash}}</td></tr>{{else}}<tr><td colspan="4" class="muted">No provenance recorded.</td></tr>{{end}}</tbody></table></div></section>
+<section class="panel"><h2>Compression</h2>
+{{range $d.Attempts}}<div class="panel"><p>Attempt {{.attempt}} — {{template "badge" (upper .status)}}{{if .accepted}} (accepted){{end}}</p>
+<dl class="facts"><dt>Canonical Tokens</dt><dd>{{.canonical_tokens}}</dd><dt>Compressed Tokens</dt><dd>{{.compressed_tokens}}</dd>
+<dt>Reduction</dt><dd>{{if .canonical_tokens}}{{.canonical_tokens}} → {{.compressed_tokens}} tokens{{end}}</dd>
+<dt>Validation</dt><dd>{{with .validation}}{{if eq .status "PASSED"}}{{template "badge" "PASS"}}{{else}}{{template "badge" "FAILED"}}{{end}}
+{{range .failures}}<div>{{.code}}{{with .item_id}}: <span class="mono">{{.}}</span>{{end}}{{with .detail}} — {{.}}{{end}}</div>{{end}}{{else}}—{{end}}</dd>
+{{with .error_message}}<dt>Error</dt><dd>{{.}}</dd>{{end}}</dl>
+{{if and .compressed_prompt_id (not .accepted)}}<p class="muted">Not worker-ready: this compressed prompt failed validation.</p>{{end}}
+<p><a href="/projects/{{$.Shell.Project.ID}}/prompts/{{$p.id}}/diff/{{.id}}">Canonical vs compressed diff →</a></p></div>
+{{else}}<p class="muted">Not compressed.</p>{{end}}</section>
+<section class="panel"><h2>Content</h2><pre>{{$p.content}}</pre></section>
+{{end}}

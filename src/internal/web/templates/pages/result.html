@@ -1,0 +1,19 @@
+{{define "title"}}Worker result{{end}}
+{{define "content"}}
+{{$r := .Data}}
+<h1>Worker result {{short $r.ID}}</h1>
+<div class="banner info"><strong>Advisory worker output</strong>This is the worker's own report. The overseer decides completion only after deterministic validation and checkpoints.</div>
+<section class="panel"><dl class="facts">
+  <dt>Worker Report</dt><dd>{{template "badge" $r.Report.Worker}}</dd>
+  <dt>Overseer State</dt><dd>{{if $r.Report.Overseer}}{{template "badge" $r.Report.Overseer}}{{else}}—{{end}}</dd>
+  <dt>Status</dt><dd>{{$r.Status}}</dd>
+  <dt>Summary</dt><dd>{{$r.Summary}}</dd>
+  <dt>Completed</dt><dd>{{range $r.Completed}}<div>✓ {{.}}</div>{{else}}—{{end}}</dd>
+  <dt>Remaining</dt><dd>{{range $r.Remaining}}<div>○ {{.}}</div>{{else}}—{{end}}</dd>
+  <dt>Blocking</dt><dd>{{range $r.Blocking}}<div>! {{.}}</div>{{else}}—{{end}}</dd>
+  <dt>Next Action</dt><dd>{{if $r.NextAction}}{{$r.NextAction}}{{else}}—{{end}}</dd>
+  <dt>Tests</dt><dd>{{$r.TestsClaim}}</dd>
+  <dt>Dispatch</dt><dd class="mono">{{$r.DispatchID}}</dd>
+</dl></section>
+{{with $r.UnitID}}<p><a href="/projects/{{$.Shell.Project.ID}}/work-units/{{.}}">Work unit →</a></p>{{end}}
+{{end}}

@@ -1,0 +1,30 @@
+{{define "title"}}Phase {{.Data.Detail.Phase.Order}} — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data.Detail}}{{$p := $d.Phase}}{{$pid := .Shell.Project.ID}}
+<h1>Phase {{$p.Order}} — {{$p.Name}}</h1>
+<div class="grid">
+<section class="panel"><h2>Phase</h2>
+<dl class="facts">
+  <dt>Status</dt><dd>{{template "badge" $p.Status}}{{if $p.Current}} (current){{end}}</dd>
+  <dt>Description</dt><dd>{{if $p.Description}}{{$p.Description}}{{else}}—{{end}}</dd>
+  <dt>WBS</dt><dd>{{if $p.WBSVersion}}<a href="/projects/{{$pid}}/phases/{{$p.ID}}/wbs">v{{$p.WBSVersion}}</a> <span class="mono">{{short $p.WBSHash}}</span>{{else}}none — <a href="/projects/{{$pid}}/phases/{{$p.ID}}/wbs">write the WBS</a>{{end}}</dd>
+  <dt>Plan</dt><dd>{{with $p.Plan}}v{{.Version}} ({{.Kind}}, {{.Status}}){{else}}not planned{{end}}</dd>
+  <dt>Started</dt><dd>{{fmtTime $p.StartedAt}}</dd><dt>Completed</dt><dd>{{fmtTime $p.CompletedAt}}</dd>
+</dl>
+{{template "progress" $p.Progress}}
+{{if $p.Staleness.Stale}}<div class="banner warn" role="alert"><strong>! Execution Plan Stale</strong>Current WBS: v{{$p.Staleness.CurrentWBS}} · Plan source: v{{$p.Staleness.PlanSource}}<br>Replanning will occur before further execution.</div>{{end}}
+</section>
+<section class="panel"><h2>Execution Plan{{with $p.Plan}} v{{.Version}}{{end}}</h2>
+{{with $p.Plan}}<p>Source: WBS v{{.SourceWBS}}</p>{{end}}
+<dl class="facts">{{range $d.KindCounts}}<dt>{{title .Kind}}</dt><dd>{{.Count}}</dd>{{end}}</dl>
+<p><a href="/projects/{{$pid}}/phases/{{$p.ID}}/work-units">Work units →</a> · <a href="/projects/{{$pid}}/phases/{{$p.ID}}/graph">Dependency graph →</a></p>
+</section>
+<section class="panel"><h2>Phase completion</h2>{{template "flow" .Data.Flow}}</section>
+</div>
+<section class="panel"><h2>Phase validation</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Run</th><th scope="col">Attempt</th><th scope="col">Status</th><th scope="col">Started</th></tr></thead>
+<tbody>{{range $d.Validations}}<tr><td><a href="/projects/{{$pid}}/validations/{{.ID}}">{{short .ID}}</a></td><td>{{.Attempt}}</td><td>{{template "badge" .Status}}</td><td>{{fmtTime .StartedAt}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">No phase validation yet.</td></tr>{{end}}</tbody></table></div>
+</section>
+<p><a href="/projects/{{$pid}}/phases/{{$p.ID}}/wbs/history">WBS history</a></p>
+{{end}}

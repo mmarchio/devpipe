@@ -1,0 +1,14 @@
+{{define "title"}}Dependencies — Phase {{.Data.Phase.Order}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Dependencies — Phase {{$d.Phase.Order}} {{$d.Phase.Name}}</h1>
+<p class="muted">Every edge below is a persisted dependency ({{$d.EdgePage.Total}} total). Readiness is computed by the backend.</p>
+{{with $d.Graph}}<div class="graph panel"><svg viewBox="0 0 {{.Width}} {{.Height}}" role="img" aria-label="Dependency graph">
+{{range .Edges}}<line x1="{{.X1}}" y1="{{.Y1}}" x2="{{.X2}}" y2="{{.Y2}}" stroke="#7a8696" stroke-width="1.5"/>{{end}}
+{{range .Nodes}}<g><rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="26" rx="4" fill="#ffffff" stroke="#2b4c7e"/>
+<text x="{{.TX}}" y="{{.TY}}" font-size="12" font-family="monospace">{{.Label}}</text></g>{{end}}
+</svg></div>{{else}}<p class="muted">The plan is too large for a drawing; use the edge list.</p>{{end}}
+<div class="table-wrap"><table><thead><tr><th scope="col">Dependency</th><th scope="col"></th><th scope="col">Dependent</th></tr></thead>
+<tbody>{{range $d.Edges}}<tr><td>{{.FromKey}}</td><td aria-hidden="true">──►</td><td>{{.ToKey}}</td></tr>{{else}}<tr><td colspan="3" class="muted">No dependencies.</td></tr>{{end}}</tbody></table></div>
+{{template "pager" (dict "Page" $d.EdgePage "Base" $d.PagerBase)}}
+{{end}}

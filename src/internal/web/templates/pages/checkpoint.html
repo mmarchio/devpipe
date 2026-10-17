@@ -1,0 +1,19 @@
+{{define "title"}}Checkpoint{{end}}
+{{define "content"}}
+{{$c := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Checkpoint {{short $c.ID}}</h1>
+<section class="panel"><dl class="facts">
+  <dt>Policy</dt><dd>{{$c.Policy}}</dd>
+  <dt>Status</dt><dd>{{template "badge" $c.Status}}</dd>
+  <dt>Kind</dt><dd>{{$c.Kind}}</dd>
+  <dt>Commit</dt><dd class="mono">{{if $c.Commit}}{{$c.ShortCommit}} <span class="muted">({{$c.Commit}})</span>{{else}}—{{end}}</dd>
+  <dt>Parent</dt><dd class="mono">{{if $c.Parent}}{{$c.Parent}}{{else}}—{{end}}</dd>
+  <dt>Tree</dt><dd class="mono">{{if $c.Tree}}{{$c.Tree}}{{else}}—{{end}}</dd>
+  {{if eq $c.Kind "UNIT"}}<dt>Work Unit</dt><dd>{{if $c.TargetID}}<a href="/projects/{{$pid}}/work-units/{{$c.TargetID}}">{{if $c.TargetLabel}}{{$c.TargetLabel}}{{else}}{{short $c.TargetID}}{{end}}</a>{{else}}—{{end}}</dd>
+  {{else}}<dt>Target</dt><dd class="mono">{{if $c.TargetID}}{{$c.TargetID}}{{else}}project{{end}}</dd>{{end}}
+  <dt>Validation</dt><dd>{{if $c.ValidationRunID}}<a href="/projects/{{$pid}}/validations/{{$c.ValidationRunID}}">{{template "badge" $c.ValidationStatus}}</a>{{else}}—{{end}}</dd>
+  <dt>Key</dt><dd class="mono">{{$c.Key}}</dd>
+  {{with $c.Error}}<dt>Error</dt><dd>{{.}}</dd>{{end}}
+  <dt>Created</dt><dd>{{fmtTime $c.CreatedAt}}</dd>
+</dl></section>
+{{end}}

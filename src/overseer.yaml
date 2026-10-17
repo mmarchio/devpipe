@@ -1,0 +1,42 @@
+# Overseer configuration. Load with: OVERSEER_CONFIG_PATH=./overseer.yaml ./overseer
+# Endpoints use the devpipe-network container names and the containers'
+# internal ports (the 9140/9141 mappings are host-side only).
+worker_providers:
+  hermes:
+    kind: hermes_gateway
+    endpoint: http://devpipe-hermes:8642
+    auth_secret_env: API_SERVER_KEY
+    allowed_roots: [/go/app/src]
+    # Models Hermes knows (authenticated providers in the container's
+    # /opt/data/provider_models_cache.json); the gateway's /v1/models does
+    # not list them.
+    models:
+      - default
+      - gpt-6-sol
+      - gpt-6-sol-pro
+      - gpt-6-luna
+      - gpt-6-luna-pro
+      - gpt-5.6-sol
+      - gpt-5.6-sol-pro
+      - gpt-5.6-terra
+      - gpt-5.6-terra-pro
+      - gpt-5.6-luna
+      - gpt-5.6-luna-pro
+      - gpt-5.5
+      - gpt-5.5-pro
+      - gpt-5.4
+      - gpt-5.4-mini
+      - gpt-5.4-nano
+      - gpt-5-mini
+      - gpt-5.3-codex
+      - gpt-4.1
+      - gpt-4o
+      - gpt-4o-mini
+      - swift-qwen3.8
+      - swift-qwen-3.8
+
+compression_providers:
+  local:
+    kind: openai_compatible
+    base_url: http://172.17.0.1:9120/v1
+    api_key_env: COMPRESSION_API_KEY

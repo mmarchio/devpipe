@@ -1,0 +1,15 @@
+{{define "title"}}Continuation configuration{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$s := $d.Settings}}{{$pid := .Shell.Project.ID}}
+<h1>Continuation configuration</h1>
+{{template "config-banner" .}}
+<form method="post" action="/projects/{{$pid}}/config/continuation" class="panel">{{template "csrf" .Shell.CSRF}}
+<input type="hidden" name="config_version" value="{{$d.ConfigVersion}}"><input type="hidden" name="project_version" value="{{$d.Project.version}}">
+<div class="field"><label><input type="checkbox" name="auto_continue"{{if $d.Project.auto_continue}} checked{{end}}> Auto-continue (the engine drives running executions automatically; when off, an execution only advances through explicit step / run requests)</label>{{template "fielderror" (index .Errors "auto_continue")}}</div>
+<div class="field"><label for="k-th">Context threshold (%)</label><input id="k-th" name="context_threshold" type="number" step="0.1" min="1" max="100" value="{{$d.ThresholdPercent}}">{{template "fielderror" (index .Errors "context_threshold")}}</div>
+<div class="field"><label for="k-mc">Max continuations (-1 = no limit)</label><input id="k-mc" name="max_continuations_per_work_unit" type="number" min="-1" value="{{$s.max_continuations_per_work_unit}}">{{template "fielderror" (index .Errors "max_continuations_per_work_unit")}}</div>
+<div class="field"><label for="k-mr">Max session resets (-1 = no limit)</label><input id="k-mr" name="max_session_resets_per_work_unit" type="number" min="-1" value="{{$s.max_session_resets_per_work_unit}}">{{template "fielderror" (index .Errors "max_session_resets_per_work_unit")}}</div>
+<div class="field"><label for="k-np">No-progress threshold</label><input id="k-np" name="max_no_progress_continuations" type="number" min="1" value="{{$s.max_no_progress_continuations}}">{{template "fielderror" (index .Errors "max_no_progress_continuations")}}</div>
+<div class="field"><label for="k-uc">Unknown-context policy</label><select id="k-uc" name="unknown_context_policy">{{range $d.UnknownPolicies}}<option value="{{.}}"{{if eq . $s.unknown_context_policy}} selected{{end}}>{{.}}</option>{{end}}</select>{{template "fielderror" (index .Errors "unknown_context_policy")}}</div>
+<button type="submit" data-pending="Saving…">Save</button></form>
+{{end}}

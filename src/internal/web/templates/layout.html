@@ -1,0 +1,61 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{.Shell.CSRF}}">
+<title>{{block "title" .}}Overseer{{end}} — Overseer</title>
+<link rel="stylesheet" href="{{asset "css/app.css"}}">
+<link rel="icon" href="{{asset "images/logo.svg"}}" type="image/svg+xml">
+</head>
+<body{{with .Shell.LiveProject}} data-live-project="{{.}}"{{end}} data-live-after="{{.Shell.LiveAfter}}">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="shell">
+  <a class="brand" href="/"><img src="{{asset "images/logo.svg"}}" alt=""> Overseer</a>
+  <nav class="primary" aria-label="Primary">
+    <ul>
+    {{range .Shell.Nav}}<li><a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a></li>
+    {{end}}</ul>
+  </nav>
+  <div class="shell-status" role="status" aria-live="polite">
+    {{with .Shell.Project}}<span>Project: <a href="/projects/{{.ID}}">{{.Name}}</a> {{template "badge" .Status}}</span>
+    {{if .ExecutionStatus}}<span>Execution: {{template "badge" .ExecutionStatus}}</span>{{end}}{{end}}
+    <span id="conn" class="conn" data-state="offline">{{if .Shell.LiveProject}}Offline — connecting{{else}}Offline — static page{{end}}</span>
+    <span id="last-update" class="muted">Loaded {{fmtTime .Shell.Now}}</span>
+    <span class="muted">v{{.Shell.Version}}</span>
+  </div>
+</header>
+{{with .Shell.Project}}
+<nav class="primary panel" aria-label="Project" style="margin:0;border-radius:0;border-left:0;border-right:0">
+  <ul>
+    <li><a href="/projects/{{.ID}}">Overview</a></li>
+    <li><a href="/projects/{{.ID}}/phases">Phases</a></li>
+    <li><a href="/projects/{{.ID}}/execution">Execution</a></li>
+    <li><a href="/projects/{{.ID}}/worker">Worker</a></li>
+    <li><a href="/projects/{{.ID}}/compressor">Compressor</a></li>
+    <li><a href="/projects/{{.ID}}/validations">Validation</a></li>
+    <li><a href="/projects/{{.ID}}/roles">Roles</a></li>
+    <li><a href="/projects/{{.ID}}/workflow">Workflow</a></li>
+    <li><a href="/projects/{{.ID}}/state-files">State Files</a></li>
+    <li><a href="/projects/{{.ID}}/templates">Templates</a></li>
+    <li><a href="/projects/{{.ID}}/prompts">Prompts</a></li>
+    <li><a href="/projects/{{.ID}}/config">Configuration</a></li>
+    <li><a href="/projects/{{.ID}}/readiness">Readiness</a></li>
+    <li><a href="/projects/{{.ID}}/metrics">Metrics</a></li>
+    <li><a href="/audit?project={{.ID}}">Audit</a></li>
+  </ul>
+</nav>
+{{end}}
+<main id="main">
+{{with .Shell.Project}}{{if .Recovery}}<div class="banner" role="alert"><strong>✗ RECOVERY REQUIRED</strong>
+Automatic execution is stopped. <a href="/projects/{{.ID}}/executions/{{.ExecutionID}}/recovery">Review recovery evidence and approved actions</a>.</div>{{end}}{{end}}
+{{with .Shell.Flash}}<div class="banner {{$.Shell.FlashKind}}" role="status">{{.}}</div>{{end}}
+{{block "content" .}}{{end}}
+</main>
+<script src="{{asset "js/forms.js"}}" defer></script>
+<script src="{{asset "js/live.js"}}" defer></script>
+<script src="{{asset "js/phase-upload.js"}}" defer></script>
+<script src="{{asset "js/phase-order.js"}}" defer></script>
+<script src="{{asset "js/model-picker.js"}}" defer></script>
+</body>
+</html>{{end}}

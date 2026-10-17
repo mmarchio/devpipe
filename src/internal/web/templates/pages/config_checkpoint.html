@@ -1,0 +1,12 @@
+{{define "title"}}Checkpoint configuration{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Checkpoints</h1>
+{{template "config-banner" .}}
+<form method="post" action="/projects/{{$pid}}/config/checkpoint" class="panel">{{template "csrf" .Shell.CSRF}}
+<input type="hidden" name="config_version" value="{{$d.ConfigVersion}}">
+<div class="field"><label><input type="checkbox" name="use_git" value="yes"{{if $d.UseGit}} checked{{end}}> Use git</label>
+<div class="hint">On: a git checkpoint is committed after each accepted task and hardening group, and bootstrap fails when the working directory is not a git repository. Off: no checkpoints. Current policy: {{$d.Current}}. Takes effect for the next execution.</div></div>
+{{template "fielderror" (index .Errors "checkpoint_policy")}}{{template "fielderror" (index .Errors "settings")}}
+<button type="submit" data-pending="Saving…">Save</button></form>
+{{end}}

@@ -1,0 +1,8 @@
+{{define "title"}}Prompt templates — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$pid := .Shell.Project.ID}}
+<h1>Prompt templates</h1>
+<p class="muted">Loaded from the template store (global defaults and project templates).</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Key</th><th scope="col">Name</th><th scope="col">Purpose</th><th scope="col">Scope</th><th scope="col">Version</th><th scope="col">Enabled</th></tr></thead>
+<tbody>{{range .Data}}<tr><td class="mono"><a href="/projects/{{$pid}}/templates/{{.id}}">{{.key}}</a></td><td>{{.name}}</td><td>{{.purpose}}</td><td>{{.scope}}</td><td>v{{.current_version}}</td><td>{{if .enabled}}yes{{else}}no{{end}}</td></tr>{{end}}</tbody></table></div>
+{{end}}

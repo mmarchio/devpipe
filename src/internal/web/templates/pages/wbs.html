@@ -1,0 +1,28 @@
+{{define "title"}}WBS — Phase {{.Data.Phase.Order}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>WBS — Phase {{$d.Phase.Order}} {{$d.Phase.Name}}</h1>
+{{if .Conflict}}<div class="banner" role="alert"><strong>✗ Conflict — not saved</strong>{{.Message}} Your text is preserved below; nothing was overwritten.
+<a href="/projects/{{$pid}}/phases/{{$d.Phase.ID}}/wbs">Reload the current version (v{{$d.Version}})</a> and re-apply your changes.</div>
+{{else}}{{with .Message}}<div class="banner" role="alert">{{.}}</div>{{end}}{{end}}
+<section class="panel">
+<dl class="facts">
+  <dt>Version</dt><dd>{{if $d.Version}}v{{$d.Version}}{{else}}none{{end}}</dd>
+  <dt>Hash</dt><dd class="mono">{{if $d.Hash}}{{$d.Hash}}{{else}}—{{end}}</dd>
+  <dt>Created</dt><dd>{{fmtTime $d.Created}}</dd>
+  <dt>Modified</dt><dd>{{fmtTime $d.Modified}}</dd>
+  <dt>Plan Status</dt><dd>{{template "badge" $d.Phase.Staleness.State}}{{with $d.Phase.Plan}} — plan v{{.Version}} from WBS v{{.SourceWBS}}{{end}}</dd>
+</dl>
+{{if $d.Phase.Staleness.Stale}}<div class="banner warn"><strong>! Execution Plan Stale</strong>Current WBS: v{{$d.Phase.Staleness.CurrentWBS}} · Plan source: v{{$d.Phase.Staleness.PlanSource}}<br>Replanning will occur before further execution.</div>{{end}}
+</section>
+<form method="post" action="/projects/{{$pid}}/phases/{{$d.Phase.ID}}/wbs">
+{{template "csrf" .Shell.CSRF}}
+<input type="hidden" name="expected_version" value="{{$d.Version}}">
+<div class="field"><label for="wbs-content">WBS content</label>
+<textarea id="wbs-content" name="content" rows="24" spellcheck="false">{{if .Conflict}}{{index .Form "content"}}{{else}}{{$d.Content}}{{end}}</textarea>
+{{template "fielderror" (index .Errors "content")}}</div>
+<button type="submit" data-pending="Saving…">Save as new version</button>
+<span class="hint">Saving creates a new WBS version; history is never overwritten.</span>
+</form>
+<p><a href="/projects/{{$pid}}/phases/{{$d.Phase.ID}}/wbs/history">Version history and diff</a></p>
+{{end}}

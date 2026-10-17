@@ -1,0 +1,20 @@
+{{define "title"}}WBS history — Phase {{.Data.Phase.Order}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>WBS history — Phase {{$d.Phase.Order}} {{$d.Phase.Name}}</h1>
+<form class="filters" method="get" action="/projects/{{$pid}}/phases/{{$d.Phase.ID}}/wbs/history">
+<div class="field"><label for="from">From</label><input id="from" type="number" name="from" min="1" value="{{$d.From}}"></div>
+<div class="field"><label for="to">To</label><input id="to" type="number" name="to" min="1" value="{{$d.To}}"></div>
+<div class="field"><button type="submit">Show diff</button></div>
+</form>
+{{with $d.Diff}}<section class="panel diff" aria-label="Diff v{{.from}} to v{{.to}}"><h2>Diff v{{.from}} → v{{.to}}</h2>
+{{range .hunks}}<div class="{{if eq .operation "added"}}add{{else if eq .operation "removed"}}del{{end}}">
+<p class="muted">{{.operation}}</p>
+{{range .from_lines}}<pre class="del">- {{.}}</pre>{{end}}{{range .to_lines}}<pre class="add">+ {{.}}</pre>{{end}}</div>
+{{else}}<p class="muted">No differences.</p>{{end}}</section>{{end}}
+{{with $d.DiffError}}<div class="banner warn">{{.}}</div>{{end}}
+<div class="table-wrap"><table><thead><tr><th scope="col">Version</th><th scope="col">Hash</th><th scope="col">Created</th><th scope="col">Content</th></tr></thead>
+<tbody>{{range $i, $v := $d.Versions}}<tr><td>v{{$v.version}}{{if eq $i 0}} <strong>current</strong>{{end}}</td><td class="mono">{{short $v.content_hash}}</td><td>{{fmtTime $v.created_at}}</td>
+<td><details><summary>View (read-only)</summary><pre>{{$v.content}}</pre></details></td></tr>{{end}}</tbody></table></div>
+<p class="muted">Historical versions are read-only.</p>
+{{end}}

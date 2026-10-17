@@ -1,0 +1,28 @@
+{{define "title"}}Workflow — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Workflow</h1>
+{{with $d.Machine}}<p>Machine <span class="mono">{{.name}}</span> v{{.version}} · hash <span class="mono">{{short .hash}}</span> · initial state <span class="mono">{{.initial_state}}</span></p>{{end}}
+<form method="post" action="/projects/{{$pid}}/workflow/validate" class="actions">{{template "csrf" .Shell.CSRF}}<button type="submit" data-pending="Validating…">Validate Workflow</button></form>
+{{with $d.Validation}}<section class="panel" role="status"><h2>Validation {{if .valid}}{{template "badge" "PASS"}}{{else}}{{template "badge" "FAIL"}}{{end}}</h2>
+{{range .errors}}<p>✗ <span class="mono">{{.code}}</span>{{with .state_key}} [{{.}}]{{end}} — {{.detail}}</p>{{else}}<p>No issues.</p>{{end}}</section>{{end}}
+<section class="panel"><h2>Diagram</h2><p class="muted">Generated from the persisted state and transition records.</p>
+{{with $d.Graph}}<div class="graph"><svg viewBox="0 0 {{.Width}} {{.Height}}" role="img" aria-label="Workflow graph">
+{{range .Edges}}<line x1="{{.X1}}" y1="{{.Y1}}" x2="{{.X2}}" y2="{{.Y2}}" stroke="#7a8696" stroke-width="1.2"/>{{end}}
+{{range .Nodes}}<g><rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="26" rx="4" fill="#fff" stroke="#2b4c7e"/><text x="{{.TX}}" y="{{.TY}}" font-size="11" font-family="monospace">{{.Label}}</text></g>{{end}}
+</svg></div>{{end}}
+<ul>{{range $d.Adjacency}}<li><span class="mono">{{.From}}</span> → {{range .To}}<span class="mono">{{.}}</span> {{end}}</li>{{end}}</ul></section>
+<section class="panel"><h2>States</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Key</th><th scope="col">Kind</th><th scope="col">Roles</th><th scope="col">Template</th><th scope="col">Required files</th><th scope="col">Terminal</th><th scope="col">Enabled</th><th scope="col"></th></tr></thead>
+<tbody>{{range $d.States}}<tr><td class="mono">{{.Key}}</td><td>{{.Kind}}</td><td>{{join .Roles ", "}}</td><td class="mono">{{.PromptTemplate}}</td><td>{{join .StateFiles ", "}}</td>
+<td>{{if .Terminal}}yes{{else}}no{{end}}</td><td>{{if .Enabled}}yes{{else}}no{{end}}</td><td><a href="/projects/{{$pid}}/workflow/states/{{.Key}}">Edit</a></td></tr>{{end}}</tbody></table></div>
+<p>Terminal states: {{range $d.Terminal}}<span class="mono">{{.}}</span> {{else}}none{{end}}</p></section>
+<section class="panel"><h2>Transitions</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Source</th><th scope="col">Outcome</th><th scope="col">Condition</th><th scope="col">Destination</th><th scope="col">Priority</th><th scope="col">Enabled</th><th scope="col"></th></tr></thead>
+<tbody>{{range $d.Transitions}}<tr><td class="mono">{{.From}}</td><td class="mono">{{.Outcome}}</td><td class="mono">{{with .Condition}}{{.Field}} {{.Operator}} {{if .ContextField}}${{.ContextField}}{{else}}{{.Literal}}{{end}}{{else}}—{{end}}</td>
+<td class="mono">{{.To}}</td><td>{{.Priority}}</td><td>{{if .Enabled}}yes{{else}}no{{end}}</td><td><a href="/projects/{{$pid}}/workflow/transitions/{{.ID}}">Edit</a></td></tr>{{end}}</tbody></table></div></section>
+<section class="panel"><h2>Workflow versions</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">Version</th><th scope="col">Machine</th><th scope="col">Enabled</th></tr></thead>
+<tbody>{{range $d.Versions}}<tr><td>v{{.version}}</td><td class="mono">{{short .machine_id}}</td><td>{{if .enabled}}yes{{else}}no{{end}}</td></tr>{{end}}</tbody></table></div>
+<p class="muted">Historical executions stay tied to the machine version captured in their configuration snapshot.</p></section>
+{{end}}

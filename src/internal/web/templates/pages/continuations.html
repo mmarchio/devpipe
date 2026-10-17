@@ -1,0 +1,18 @@
+{{define "title"}}Continuations — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+<h1>Continuations and session resets</h1>
+{{range .Data}}<section class="panel">
+<h2>Continuation #{{.Number}} — {{.StrategyLabel}}</h2>
+<dl class="facts">
+  <dt>Status</dt><dd>{{template "badge" .Status}}</dd>
+  <dt>Context before</dt><dd>{{with .ContextBefore}}{{pct (deref .)}}{{else}}unknown{{end}}</dd>
+  <dt>Reason</dt><dd>{{.Reason}}</dd>
+  <dt>Status carried forward</dt><dd>{{.Completed}} completed · {{.Remaining}} remaining · {{.Blocking}} blocking</dd>
+  {{if .Reset}}<dt>Session Reset</dt><dd>Old session <span class="mono">{{if .OldSession}}{{short .OldSession}}{{else}}—{{end}}</span> → new session <span class="mono">{{if .NewSession}}{{short .NewSession}}{{else}}pending{{end}}</span>.
+  Task reconstructed from persisted state — the same work unit continues; this is not a task restart.</dd>{{end}}
+  <dt>Work unit</dt><dd><a href="/projects/{{$.Shell.Project.ID}}/work-units/{{.UnitID}}">{{short .UnitID}}</a></dd>
+  {{with .RecoveryReason}}<dt>Recovery</dt><dd>{{.}}</dd>{{end}}
+  <dt>Created</dt><dd>{{fmtTime .CreatedAt}}</dd>
+</dl></section>
+{{else}}<p class="muted">No continuations.</p>{{end}}
+{{end}}

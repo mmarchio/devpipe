@@ -1,0 +1,22 @@
+{{define "title"}}Execution — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>Execution{{with $d.Overview.Execution}} #{{.Number}}{{end}}</h1>
+{{with $d.Overview.Execution}}
+<div data-fragment-url="/projects/{{$pid}}/fragments/actions">{{template "frag-actions" $d.Actions}}</div>
+<section class="panel"><dl class="facts">
+  <dt>Status</dt><dd>{{template "badge" .Status}}</dd><dt>Generation</dt><dd>{{.Generation}}</dd>
+  <dt>Started</dt><dd>{{fmtTime .StartedAt}}</dd><dt>Completed</dt><dd>{{fmtTime .CompletedAt}}</dd>
+  {{with .RecoveryReason}}<dt>Recovery reason</dt><dd>{{.}}</dd>{{end}}
+  <dt>Runtime State</dt><dd class="mono">{{$d.Overview.Runtime.StateKey}}</dd>
+</dl>
+<p><a href="/projects/{{$pid}}/executions/{{.ID}}/recovery">Recovery</a> · <a href="/projects/{{$pid}}/worker">Worker</a> · <a href="/projects/{{$pid}}/validations">Validation</a> · <a href="/projects/{{$pid}}/repository">Repository</a> · <a href="/projects/{{$pid}}/continuations">Continuations</a></p>
+</section>
+<div data-fragment-url="/projects/{{$pid}}/fragments/flows">{{template "frag-flows" $d.Flows}}</div>
+<form class="filters" method="get" aria-label="Filter timeline">
+<fieldset><legend>Timeline categories</legend>
+{{range $d.AllCategories}}<label style="display:inline;margin-right:.8rem"><input type="checkbox" name="category" value="{{.}}"{{if contains $d.Categories .}} checked{{end}}> {{.}}</label>{{end}}
+</fieldset><button type="submit">Filter</button></form>
+<div data-fragment-url="/projects/{{$pid}}/fragments/timeline?execution={{.ID}}{{range $d.Categories}}&amp;category={{.}}{{end}}">{{template "frag-timeline" $d.Timeline}}</div>
+{{else}}<p class="muted">The project has no execution yet. <a href="/projects/{{$pid}}/readiness">Check readiness</a>.</p>{{end}}
+{{end}}

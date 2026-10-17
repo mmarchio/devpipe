@@ -1,0 +1,18 @@
+{{define "title"}}State {{.Data.State.Key}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$pid := .Shell.Project.ID}}
+<h1>State {{$d.State.Key}}</h1>
+{{with .Message}}<div class="banner" role="alert"><strong>Not saved.</strong>{{.}}</div>{{end}}
+<form method="post" action="/projects/{{$pid}}/workflow/states/{{$d.State.Key}}" class="panel">
+{{template "csrf" .Shell.CSRF}}
+<div class="field"><label for="s-name">Name</label><input id="s-name" name="name" type="text" value="{{if .Form}}{{index .Form "name"}}{{else}}{{$d.State.Name}}{{end}}"></div>
+<div class="field"><label for="s-kind">Kind</label><select id="s-kind" name="kind">{{range $d.Kinds}}<option value="{{.}}"{{if eq . $d.State.Kind}} selected{{end}}>{{.}}</option>{{end}}</select>{{template "fielderror" (index .Errors "kind")}}</div>
+<div class="field"><label for="s-role">Role</label><select id="s-role" name="role"><option value="">(unchanged)</option>{{range $d.Roles}}<option value="{{.id}}">{{.key}}</option>{{end}}</select>
+<div class="hint">Current: {{join $d.State.Roles ", "}}</div></div>
+<div class="field"><label for="s-instr">Instruction</label><textarea id="s-instr" name="instruction" rows="8">{{$d.Instruction}}</textarea></div>
+<div class="field"><label for="s-tmpl">Prompt template</label><input id="s-tmpl" name="prompt_template" type="text" value="{{$d.State.PromptTemplate}}">{{template "fielderror" (index .Errors "prompt_template")}}</div>
+<div class="field"><label for="s-files">Required files <span class="muted">(comma separated categories)</span></label><input id="s-files" name="state_files" type="text" value="{{join $d.State.StateFiles ", "}}"></div>
+<button type="submit" data-pending="Saving…">Save state</button>
+</form>
+<p class="muted">The backend validates every change; invalid configuration is rejected.</p>
+{{end}}

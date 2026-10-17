@@ -1,0 +1,8 @@
+{{define "title"}}Executions{{end}}
+{{define "content"}}
+<h1>Active executions</h1>
+<div class="table-wrap"><table><thead><tr><th scope="col">Project</th><th scope="col">Execution</th><th scope="col">Phase</th><th scope="col">Progress</th><th scope="col">State</th><th scope="col">Last Activity</th></tr></thead>
+<tbody>{{range .Data.Rows}}<tr><td><a href="/projects/{{.ID}}">{{.Name}}</a></td><td><a href="/projects/{{.ID}}/execution">{{template "badge" .ExecutionStatus}}</a></td><td>{{.CurrentPhase}}</td><td>{{pct .Progress.Percent}}</td><td class="mono">{{.CurrentState}}</td><td>{{fmtTime .LastActivity}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">No active executions.</td></tr>{{end}}</tbody></table></div>
+{{template "pager" (dict "Page" .Data.Page "Base" "/executions?")}}
+{{end}}

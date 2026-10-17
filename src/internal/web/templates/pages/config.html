@@ -1,0 +1,13 @@
+{{define "title"}}Configuration — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$pid := .Shell.Project.ID}}
+<h1>Project configuration</h1>
+<ul>
+<li><a href="/projects/{{$pid}}/config/worker">Worker</a> — provider, model, context window, timeout, session policy</li>
+<li><a href="/projects/{{$pid}}/config/compression">Compression</a> — provider, model, targets, attempts, validation mode</li>
+<li><a href="/projects/{{$pid}}/config/planning">Planning policy</a> — Feature / Component / Atomic / Custom</li>
+<li><a href="/projects/{{$pid}}/config/continuation">Continuation</a> — context threshold, limits, unknown-context policy</li>
+<li><a href="/projects/{{$pid}}/config/checkpoint">Checkpoints</a> — REQUIRED / BEST_EFFORT / DISABLED</li>
+</ul>
+<p class="muted">Every form carries the version it was loaded at; a concurrent change is reported as a conflict instead of being overwritten.</p>
+{{end}}

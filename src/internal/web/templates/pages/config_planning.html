@@ -1,0 +1,20 @@
+{{define "title"}}Planning policy{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$c := $d.Config}}{{$pid := .Shell.Project.ID}}
+<h1>Planning policy</h1>
+{{template "config-banner" .}}
+<form method="post" action="/projects/{{$pid}}/config/planning" class="panel">{{template "csrf" .Shell.CSRF}}
+<input type="hidden" name="config_version" value="{{$d.ConfigVersion}}">
+<fieldset><legend>Policy</legend>{{range $d.Modes}}<label><input type="radio" name="mode" value="{{.}}"{{if eq . (print $c.Mode)}} checked{{end}}> {{.}}</label>{{end}}{{template "fielderror" (index .Errors "mode")}}</fieldset>
+<fieldset><legend>Atomic options</legend>
+<label><input type="checkbox" name="independently_testable"{{if $c.Atomic.RequireIndependentlyTestable}} checked{{end}}> Independently testable units</label>
+<label><input type="checkbox" name="small_functions"{{if $c.PreferSmallFunctions}} checked{{end}}> Prefer small functions/methods</label>
+<label><input type="checkbox" name="separate_composition"{{if $c.Atomic.SeparateComposition}} checked{{end}}> Separate primitives from composition</label>
+<label><input type="checkbox" name="separate_integration"{{if $c.Atomic.SeparateIntegration}} checked{{end}}> Separate integration work</label>
+<label><input type="checkbox" name="acceptance_criteria"{{if $c.Atomic.RequireAcceptanceCriteria}} checked{{end}}> Require acceptance criteria</label>
+<label><input type="checkbox" name="dependencies"{{if $c.Atomic.RequireExplicitDependencies}} checked{{end}}> Require dependencies</label>
+<label><input type="checkbox" name="single_invocation"{{if $c.Atomic.RequireSingleInvocation}} checked{{end}}> Target: one worker invocation</label>
+{{template "fielderror" (index .Errors "atomic")}}</fieldset>
+<div class="field"><label for="p-custom">Custom policy text (Custom only)</label><textarea id="p-custom" name="custom_policy" rows="4">{{$c.CustomPolicy}}</textarea>{{template "fielderror" (index .Errors "custom_policy")}}</div>
+<button type="submit" data-pending="Saving…">Save</button></form>
+{{end}}
