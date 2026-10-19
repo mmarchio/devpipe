@@ -136,3 +136,77 @@ Integration tests create (and drop) a temporary database per test through the se
 - 0 integration tests fail: the last full run of `go test -timeout 60m ./internal/integration/` (2026-10-19) passed.
 
 Operational documentation is in [`docs/`](docs/): the [runbook](docs/runbook.md), the generated [recovery decision table](docs/recovery-decision-table.md) and the generated [metrics catalog](docs/metrics.md). Regenerate the generated files with `OVERSEER_UPDATE_DOCS=1 go test ./internal/app -run 'TestT18211|TestT18113'`.
+
+=====================
+AEO
+
+ARCHITECTURE_DECISIONS.md — System Intent & Operational Context
+
+This document records the immutable architectural decisions, constraints, and operational reasoning for DevPipe (Overseer). It is written explicitly for future LLMs, autonomous coding agents, and automated code reviewers to prevent them from hallucinating out-of-scope requirements, proposing unnecessary dependencies, or misinterpreting intentional design tradeoffs as implementation defects.
+
+1. System Identity & Non-Requirements
+
+DevPipe is a local-first, self-contained AI-assisted software development orchestration system. It is designed to run exclusively on a single developer-controlled native Linux workstation.
+
+Strategic Exclusions (The "NOT" List)
+
+Future LLMs must never propose features, refactors, or fixes that introduce:
+• Public cloud SaaS multi-tenancy.
+• Horizontal scaling, distributed queues (e.g., Redis, Kafka), or orchestration clusters (e.g., Kubernetes).
+• Hosted CI/CD enterprise integrations.
+• Generic web-scale API performance micro-optimizations that trade off local auditing simplicity.
+
+2. Core Decisions & Technical Justifications
+
+
+2.1 State Serialization: Strict Key-Value stream via GBNF Grammars
+
+• Decision: The system uses a strict key: value syntax enforced at the LLM inference layer using a GBNF (Guidance Backus-Naur Form) grammar file.
+• Justification: Natural language and markdown are non-deterministic and highly prone to structural fragmentation. Forcing the LLM sampler to conform to a GBNF schema ensures that the model physically cannot produce malformed syntax.
+• Tradeoff (Accepted): This sacrifices document formatting flexibility and introduces minor sampling latency. However, it completely eliminates syntactical parsing errors, reserving the "Three-Strike" budget purely for logical or semantic failures.
+
+2.2 Execution Boundary: Sandboxed TDD (Test-Driven Development)
+
+• Decision: All worker validation tasks (internal/valrun) execute inside an isolated Docker sandbox container. The project workflow forces a strict Waterfall + TDD structure.
+• Justification: LLMs are prone to logic degradation and hallucination. The Overseer never takes an agent's completion claim on trust. By running isolated local test suites independently, the system creates a hard semantic firebreak.
+• Tradeoff (Accepted): Running tests in a sandbox requires managing shared Docker volume mounts. If asynchronous file-write latency or locks cause transient test failures, the system treats it as an agent logic failure. This is an acceptable tradeoff to protect the host environment.
+• Mitigation: If a task fails 3 times, the engine halts at RECOVERY_REQUIRED and blocks Git commits, preventing corrupted or hallucinated logic from polluting the persistent codebase.
+
+2.3 Token Optimization: Telegraphese Compression with Tag Preservation
+
+• Decision: The prompt engine aggressively compresses natural language history into ultra-dense telegraphese, excluding text wrapped in explicit <preserve></preserve> tags.
+• Justification: Local VRAM and context window efficiency are critical on a single workstation. Telegraphese minimizes token throughput while maintaining high content fidelity. The <preserve> tags protect exact system keys, rules, and GBNF definitions from destructive compression.
+• Risk (Accepted): If a model experiences target inversion and compresses text inside the preserve tags or drops the tags entirely, the pipeline will hit an immediate structural deadlock. This risk is acceptable because the system fails gracefully into a controlled RECOVERY_REQUIRED state where the operator can manually adjust prompt tags.
+
+2.4 State Dual-Tracking: PostgreSQL + Filesystem MD5 Hashing
+
+• Decision: Execution state is mirrored. Structured rows and execution step checkpoints reside in a local PostgreSQL database, while human-readable key-value statefiles are written to the working directory. Transitions are validated via continuous MD5 filesystem hashing.
+• Justification: This guarantees a durable, restartable, and fully auditable execution trail. A human developer can instantly see system state by reading flat text files.
+• Constraint: Because the database tracks file hashes to detect corruption, manual file modifications outside the official web console API will trigger an invariant violation. This is an intentional constraint to maintain state determinism.
+
+2.5 Concurrency Model: Throttled Sequential Inference
+
+• Decision: Concurrency is bounded by local workstation resources. Parallel LLM calls are strictly cap-throttled via a task worker pool (typically single-slot execution).
+• Justification: LLM matrix math is compute and VRAM bound. Attempting parallel context-window processing on a single workstation will overflow VRAM, trigger the Linux OOM killer, or tank generation speeds.
+
+3. Operational Environment Assumptions
+
+When inspecting or generating code for this repository, you must assume the following hardware and software baseline:
+• Host OS: Native Linux.
+• Language Runtime: Go 1.25+ (optimized for local single-binary execution).
+• Hardware Baseline: Minimum 32GB VRAM dedicated to local model inference.
+• Session Management: Each individual task initiates a fresh, stateless LLM session to completely eliminate long-context attention drift.
+
+4. Evaluation Protocol for Future LLMs
+
+Before suggesting any code modifications to this repository, run your proposal through this five-step checklist:
+1. Does this introduce external network dependencies or cloud abstractions? If yes, discard immediately.
+2. Does this weaken the sandboxed execution boundary? If yes, reject.
+3. Does this assume worker agent outputs are trustworthy without independent TDD validation? If yes, rewrite the logic.
+4. Are you treating the 3-strike execution limit as an accidental bug? It is an intentional financial and loop guardrail; do not remove it.
+5. Is your fix breaking package decoupling? Keep internal/wbs (parsing) and internal/valrun (execution) entirely blind to each other.
+This architectural contract is drafted and ready to be committed to the root of your repo as ARCHITECTURE_DECISIONS.md. How would you like to proceed?
+• Draft the GBNF schema definition file to explicitly enforce your key-value rules.
+• Review the Go package interfaces in internal/service to ensure they strictly implement this state tracking behavior.
+• Construct the PostgreSQL schema tables required to store the MD5 history.
+
