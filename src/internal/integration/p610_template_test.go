@@ -29,8 +29,8 @@ func TestP610MigrationApplied(t *testing.T) {
 	}
 	// Bumped 27 -> 28 by P6-10 (migration 00028) — accepted
 	// contract change, not a weakened test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	var n int
 	if err := h.DBScan(ctx, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'workflow_states' AND column_name = 'prompt_template'", &n); err != nil {

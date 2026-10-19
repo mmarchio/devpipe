@@ -95,8 +95,8 @@ func TestP705MigrationApplied(t *testing.T) {
 	}
 	// Bumped 33 -> 35 by P7-05 (migrations 00034/00035) — accepted contract
 	// change, not a weakened test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	for _, table := range []string{"state_file_types", "state_files"} {
 		var n int

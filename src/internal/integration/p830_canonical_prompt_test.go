@@ -82,8 +82,8 @@ func TestP830MigrationApplied(t *testing.T) {
 	}
 	// Bumped 43 -> 44 by P8-30 (migration 00044, canonical_prompts) —
 	// accepted contract change, not a weakened test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	var n int
 	if err := h.DBScan(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'canonical_prompts'", &n); err != nil {

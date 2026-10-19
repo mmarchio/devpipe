@@ -412,8 +412,8 @@ func TestP706MigrationApplied(t *testing.T) {
 	}
 	// Bumped 35 -> 36 by P7-06 (migration 00036) — accepted contract
 	// change, not a weakened test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	var n int
 	if err := h.DBScan(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'state_file_versions'", &n); err != nil {

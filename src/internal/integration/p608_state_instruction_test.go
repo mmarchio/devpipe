@@ -30,8 +30,8 @@ func TestP608MigrationsApplied(t *testing.T) {
 	// Bumped 24 -> 26 by P6-08 (migrations 00025/00026, state_instructions /
 	// state_instruction_versions) — accepted contract change, not a
 	// weakened test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	for _, table := range []string{"state_instructions", "state_instruction_versions"} {
 		var n int

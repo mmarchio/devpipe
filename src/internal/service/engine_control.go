@@ -92,6 +92,9 @@ const (
 	LimitStatefileResends = "STATEFILE_RESENDS"
 	LimitProtocolRepairs  = "PROTOCOL_REPAIRS"
 	LimitContinuations    = "CONTINUATIONS"
+	// LimitIdenticalFailures counts consecutive identical failed
+	// validations of a task (a replan resets it too).
+	LimitIdenticalFailures = "IDENTICAL_FAILURES"
 )
 
 // Recovery reasons (or the parts that identify them) of the attempt limits.
@@ -122,6 +125,8 @@ func attemptLimitOf(reason string) string {
 		return LimitProtocolRepairs
 	case strings.HasPrefix(reason, reasonContinuationPrefix):
 		return LimitContinuations
+	case strings.HasPrefix(reason, reasonIdenticalFailuresPrefix):
+		return LimitIdenticalFailures
 	}
 	return ""
 }

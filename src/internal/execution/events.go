@@ -26,22 +26,25 @@ const (
 
 // Engine event types (WBS 16.81, P16-14).
 const (
-	EventStepIntent            EventType = "EXECUTION_STEP_INTENT"
-	EventStepApplied           EventType = "EXECUTION_STEP_APPLIED"
-	EventPlanActivated         EventType = "PLAN_ACTIVATED"
-	EventPlanRejected          EventType = "PLAN_REJECTED"
-	EventPlanAmended           EventType = "PLAN_AMENDED"
-	EventUnitClaimed           EventType = "WORK_UNIT_CLAIMED"
-	EventDispatchIntent        EventType = "WORKER_DISPATCH_INTENT"
-	EventValidationStarted     EventType = "VALIDATION_STARTED"
-	EventValidationPassed      EventType = "VALIDATION_PASSED"
-	EventValidationFailed      EventType = "VALIDATION_FAILED"
-	EventValidationInfraError  EventType = "VALIDATION_INFRA_ERROR"
-	EventFixAttempt            EventType = "FIX_ATTEMPT"
-	EventCheckpointCreated     EventType = "CHECKPOINT_CREATED"
-	EventCheckpointFailed      EventType = "CHECKPOINT_FAILED"
-	EventCheckpointSkipped     EventType = "CHECKPOINT_SKIPPED"
-	EventUnitDone              EventType = "WORK_UNIT_DONE"
+	EventStepIntent           EventType = "EXECUTION_STEP_INTENT"
+	EventStepApplied          EventType = "EXECUTION_STEP_APPLIED"
+	EventPlanActivated        EventType = "PLAN_ACTIVATED"
+	EventPlanRejected         EventType = "PLAN_REJECTED"
+	EventPlanAmended          EventType = "PLAN_AMENDED"
+	EventUnitClaimed          EventType = "WORK_UNIT_CLAIMED"
+	EventDispatchIntent       EventType = "WORKER_DISPATCH_INTENT"
+	EventValidationStarted    EventType = "VALIDATION_STARTED"
+	EventValidationPassed     EventType = "VALIDATION_PASSED"
+	EventValidationFailed     EventType = "VALIDATION_FAILED"
+	EventValidationInfraError EventType = "VALIDATION_INFRA_ERROR"
+	EventFixAttempt           EventType = "FIX_ATTEMPT"
+	EventCheckpointCreated    EventType = "CHECKPOINT_CREATED"
+	EventCheckpointFailed     EventType = "CHECKPOINT_FAILED"
+	EventCheckpointSkipped    EventType = "CHECKPOINT_SKIPPED"
+	EventUnitDone             EventType = "WORK_UNIT_DONE"
+	// EventUnitReplanned: the architect replanned a task the overseer's
+	// validation failed the same way repeatedly.
+	EventUnitReplanned         EventType = "WORK_UNIT_REPLANNED"
 	EventPhaseValidationFailed EventType = "PHASE_VALIDATION_FAILED"
 	EventPhaseDone             EventType = "PHASE_DONE"
 	EventExecutionWaiting      EventType = "EXECUTION_WAITING"
@@ -81,7 +84,7 @@ var allEvents = []EventType{
 	EventHardeningStarted, EventHardeningAnalyzed, EventHardeningOperation,
 	EventHardeningGroupDone, EventHardeningGroupSkipped, EventHardeningCompleted,
 	EventFinalValidationPassed, EventFinalValidationFailed, EventProjectCompleted,
-	EventRepositoryHeadAccepted, EventWorkerRunEvidence,
+	EventRepositoryHeadAccepted, EventWorkerRunEvidence, EventUnitReplanned,
 }
 
 // AllEventTypes returns every type in declaration order.

@@ -1,0 +1,24 @@
+{{define "title"}}Models{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<p><a href="/configuration">← Configuration</a></p>
+<h1>Models</h1>
+<p class="muted">LLM providers, saved to <span class="mono">{{$d.ConfigPath}}</span>. Changes apply immediately: requests in flight finish on the previous settings, new requests use the new ones.
+Secrets are referenced (an environment variable or a file), never stored.</p>
+<section class="panel"><h2>Worker providers</h2>
+<p class="muted">Agent gateways that run the project team (Hermes).</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Name</th><th scope="col">Endpoint</th><th scope="col">Models</th><th scope="col">Secret</th><th scope="col">Used by</th></tr></thead>
+<tbody>{{range $d.Workers}}<tr><td><a href="/configuration/models/worker/{{.Name}}">{{.Name}}</a></td><td class="mono">{{.Endpoint}}</td><td>{{len .Models}}</td>
+<td>{{if or .SecretEnv .SecretFile}}{{if .SecretConfigured}}configured{{else}}<strong>not set</strong>{{end}}{{else}}none{{end}}</td><td>{{if .UsedBy}}{{join .UsedBy ", "}}{{else}}—{{end}}</td></tr>
+{{else}}<tr><td colspan="5" class="muted">No worker providers.</td></tr>{{end}}</tbody></table></div>
+<p><a href="/configuration/models/worker/new">+ Add worker provider</a></p>
+</section>
+<section class="panel"><h2>Compressor providers</h2>
+<p class="muted">OpenAI-compatible endpoints (cloud, LAN or local: llama.cpp, Ollama, vLLM) used to compress prompts.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Name</th><th scope="col">Base URL</th><th scope="col">Secret</th><th scope="col">Used by</th></tr></thead>
+<tbody>{{range $d.Compressors}}<tr><td><a href="/configuration/models/compression/{{.Name}}">{{.Name}}</a></td><td class="mono">{{.Endpoint}}</td>
+<td>{{if or .SecretEnv .SecretFile}}{{if .SecretConfigured}}configured{{else}}<strong>not set</strong>{{end}}{{else}}none{{end}}</td><td>{{if .UsedBy}}{{join .UsedBy ", "}}{{else}}—{{end}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">No compressor providers.</td></tr>{{end}}</tbody></table></div>
+<p><a href="/configuration/models/compression/new">+ Add compressor provider</a></p>
+</section>
+{{end}}

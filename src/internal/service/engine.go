@@ -1086,6 +1086,9 @@ func (e *Engine) controlFacts(ctx context.Context, st *engineState) execution.Ro
 // facts: a validation verdict (PASS / FAIL) when the state routes on one,
 // then the routing preference, then EVALUATE / PROCEED.
 func (e *Engine) handleControl(ctx context.Context, st *engineState, step *persistence.StepRecord) (execution.StepResult, error) {
+	if st.cur.Key == "REPLAN_CHECK" && st.statefileWorkflow() {
+		return e.handleReplanCheck(ctx, st, step)
+	}
 	if st.cur.Key == "ROUTE" && st.statefileWorkflow() {
 		// The output-format skill command must have reached Hermes; a
 		// failed send is resent (bounded) before any work is routed.

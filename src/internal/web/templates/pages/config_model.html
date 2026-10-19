@@ -1,0 +1,40 @@
+{{define "title"}}{{if .Data.New}}Add {{.Data.KindName}} provider{{else}}Provider {{.Data.Name}}{{end}}{{end}}
+{{define "content"}}
+{{$d := .Data}}{{$f := $d.Form}}
+<p><a href="/configuration/models">← Models</a></p>
+<h1>{{if $d.New}}Add {{$d.KindName}} provider{{else}}{{$d.KindName}} provider {{$d.Name}}{{end}}</h1>
+{{with .Message}}<div class="banner" role="alert"><strong>✗ Not saved</strong> {{.}}</div>{{end}}
+<form method="post" action="/configuration/models/{{$d.Kind}}{{if not $d.New}}/{{$d.Name}}{{end}}" class="panel">{{template "csrf" .Shell.CSRF}}
+{{if $d.New}}<div class="field"><label for="p-name">Name</label><input id="p-name" name="name" type="text" required pattern="[a-z0-9][a-z0-9_\-]*" value="{{index $f "name"}}">
+<div class="hint">Lowercase letters, digits, '-' and '_'. Projects select the provider by this name.</div>{{template "fielderror" (index .Errors "name")}}</div>{{end}}
+<div class="field"><label for="p-endpoint">{{if eq $d.Kind "worker"}}Gateway endpoint{{else}}Base URL{{end}}</label><input id="p-endpoint" name="endpoint" type="url" required value="{{index $f "endpoint"}}">
+<div class="hint">{{if eq $d.Kind "worker"}}The Hermes gateway, for example http://devpipe-hermes:8642.{{else}}The OpenAI-compatible API root, for example http://llm:8080/v1.{{end}}</div>{{template "fielderror" (index .Errors "endpoint")}}</div>
+<fieldset><legend>{{if eq $d.Kind "worker"}}Gateway token{{else}}API key{{end}} <span class="muted">(reference, optional)</span></legend>
+<div class="field"><label for="p-env">Environment variable</label><input id="p-env" name="secret_env" type="text" value="{{index $f "secret_env"}}" placeholder="{{if eq $d.Kind "worker"}}API_SERVER_KEY{{else}}OPENAI_API_KEY{{end}}">{{template "fielderror" (index .Errors "secret_env")}}</div>
+<div class="field"><label for="p-file">or secret file</label><input id="p-file" name="secret_file" type="text" value="{{index $f "secret_file"}}" placeholder="/run/secrets/…">{{template "fielderror" (index .Errors "secret_file")}}</div>
+{{with $d.Provider}}<div class="hint">Status: {{if or .SecretEnv .SecretFile}}{{if .SecretConfigured}}configured{{else}}<strong>the referenced secret is not set</strong>{{end}}{{else}}no secret{{end}}</div>{{end}}
+</fieldset>
+{{if eq $d.Kind "worker"}}
+<div class="field"><label for="p-models">Models <span class="muted">(one per line)</span></label><textarea id="p-models" name="models" rows="6">{{index $f "models"}}</textarea>
+<div class="hint">The models the console offers for this provider. Leave empty to use the gateway's own model list.</div></div>
+<div class="field"><label for="p-roots">Allowed roots <span class="muted">(one per line)</span></label><textarea id="p-roots" name="allowed_roots" rows="3">{{index $f "allowed_roots"}}</textarea>
+<div class="hint">Project working directories must be inside one of these absolute paths. Empty = unconfined.</div>{{template "fielderror" (index .Errors "allowed_roots")}}</div>
+<div class="field"><label for="p-ct">Connect timeout <span class="muted">(e.g. 10s; blank = default)</span></label><input id="p-ct" name="connect_timeout" type="text" value="{{index $f "connect_timeout"}}">{{template "fielderror" (index .Errors "connect_timeout")}}</div>
+<div class="field"><label for="p-st">Session timeout <span class="muted">(e.g. 30m; blank = default)</span></label><input id="p-st" name="session_timeout" type="text" value="{{index $f "session_timeout"}}">{{template "fielderror" (index .Errors "session_timeout")}}</div>
+<div class="field"><label for="p-mc">Maximum concurrent dispatches <span class="muted">(blank = no limit; applies at restart)</span></label><input id="p-mc" name="max_concurrent" type="number" min="0" value="{{index $f "max_concurrent"}}">{{template "fielderror" (index .Errors "max_concurrent")}}</div>
+{{else}}
+<div class="field"><label for="p-to">Timeout <span class="muted">(e.g. 2m; blank = default)</span></label><input id="p-to" name="timeout" type="text" value="{{index $f "timeout"}}">{{template "fielderror" (index .Errors "timeout")}}</div>
+<div class="field"><label for="p-mot">Maximum output tokens <span class="muted">(blank = provider default)</span></label><input id="p-mot" name="max_output_tokens" type="number" min="0" value="{{index $f "max_output_tokens"}}">{{template "fielderror" (index .Errors "max_output_tokens")}}</div>
+{{end}}
+{{template "fielderror" (index .Errors "configuration")}}
+<p class="hint">TLS, circuit breaker and reconnect settings are kept as they are in the configuration file.</p>
+<button type="submit" data-pending="Saving…">{{if $d.New}}Add provider{{else}}Save and apply{{end}}</button>
+</form>
+{{with $d.Provider}}
+<section class="panel"><h2>Delete provider</h2>
+{{if .UsedBy}}<p>This provider is used by {{join .UsedBy ", "}}; change those projects' settings before deleting it.</p>
+{{else}}<form method="post" action="/configuration/models/{{$d.Kind}}/{{$d.Name}}/delete">{{template "csrf" $.Shell.CSRF}}
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> Remove <span class="mono">{{$d.Name}}</span> from the configuration file.</label></div>
+<button type="submit" class="danger" data-pending="Deleting…">Delete provider</button></form>{{end}}
+</section>{{end}}
+{{end}}

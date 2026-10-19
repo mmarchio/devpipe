@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -88,7 +89,9 @@ func TestP15124CompressionFailureRetry(t *testing.T) {
 	var healthy atomic.Bool
 	var target *url.URL
 	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if !healthy.Load() {
+		// Model listing always succeeds so the provider passes bootstrap's
+		// reachability check; only compression calls fail while unhealthy.
+		if !healthy.Load() && !strings.HasSuffix(req.URL.Path, "/models") {
 			http.Error(w, "down", http.StatusInternalServerError)
 			return
 		}

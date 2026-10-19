@@ -50,6 +50,17 @@ func p18Migrations(t *testing.T) []database.Migration {
 	return migs
 }
 
+// latestMigrationVersion is the highest migration version on disk: the
+// schema version a fully migrated database must report.
+func latestMigrationVersion(t *testing.T) int {
+	t.Helper()
+	v := 0
+	for _, m := range p18Migrations(t) {
+		v = max(v, m.Version)
+	}
+	return v
+}
+
 // tableDigests returns an md5 of every table's sorted rows.
 func tableDigests(t *testing.T, ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row

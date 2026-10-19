@@ -1,0 +1,40 @@
+{{define "title"}}System configuration{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<p><a href="/configuration">← Configuration</a></p>
+<h1>System</h1>
+{{with .Message}}<div class="banner" role="alert"><strong>✗ Not saved</strong> {{.}}</div>{{end}}
+{{with $d.Database}}
+{{if .RestartRequired}}<div class="banner" role="status"><strong>Restart required.</strong> The configured database settings differ from the ones the running overseer connected with; they apply when it restarts.</div>{{end}}
+<section class="panel"><h2>Database connection</h2>
+<p class="muted">Saved to <span class="mono">{{.ConfigPath}}</span>. Database settings apply when the overseer restarts.
+The password is never stored by the console: set <span class="mono">OVERSEER_DATABASE_PASSWORD</span> in the environment.</p>
+<form method="post" action="/configuration/system">{{template "csrf" $.Shell.CSRF}}
+<div class="field"><label for="db-host">Host</label><input id="db-host" name="host" type="text" required value="{{index $d.Form "host"}}">{{with index .Overrides "host"}}<div class="hint">Overridden by <span class="mono">{{.}}</span> (effective: {{$d.Database.Effective.Host}}).</div>{{end}}{{template "fielderror" (index $.Errors "host")}}</div>
+<div class="field"><label for="db-port">Port</label><input id="db-port" name="port" type="number" min="1" max="65535" required value="{{index $d.Form "port"}}">{{with index .Overrides "port"}}<div class="hint">Overridden by <span class="mono">{{.}}</span> (effective: {{$d.Database.Effective.Port}}).</div>{{end}}{{template "fielderror" (index $.Errors "port")}}</div>
+<div class="field"><label for="db-name">Database</label><input id="db-name" name="name" type="text" required value="{{index $d.Form "name"}}">{{with index .Overrides "name"}}<div class="hint">Overridden by <span class="mono">{{.}}</span> (effective: {{$d.Database.Effective.Name}}).</div>{{end}}{{template "fielderror" (index $.Errors "name")}}</div>
+<div class="field"><label for="db-user">User</label><input id="db-user" name="user" type="text" required value="{{index $d.Form "user"}}">{{with index .Overrides "user"}}<div class="hint">Overridden by <span class="mono">{{.}}</span> (effective: {{$d.Database.Effective.User}}).</div>{{end}}{{template "fielderror" (index $.Errors "user")}}</div>
+<div class="field"><label for="db-ssl">SSL mode</label><select id="db-ssl" name="ssl_mode">{{range $d.SSLModes}}<option value="{{.}}"{{if eq . (index $d.Form "ssl_mode")}} selected{{end}}>{{.}}</option>{{end}}</select>{{with index .Overrides "ssl_mode"}}<div class="hint">Overridden by <span class="mono">{{.}}</span> (effective: {{$d.Database.Effective.SSLMode}}).</div>{{end}}{{template "fielderror" (index $.Errors "ssl_mode")}}</div>
+<div class="field"><label for="db-max">Maximum connections <span class="muted">(blank = 10)</span></label><input id="db-max" name="max_conns" type="number" min="0" value="{{index $d.Form "max_conns"}}">{{template "fielderror" (index $.Errors "max_conns")}}</div>
+<div class="field"><label for="db-min">Minimum connections <span class="muted">(blank = 0)</span></label><input id="db-min" name="min_conns" type="number" min="0" value="{{index $d.Form "min_conns"}}"></div>
+<div class="field"><label for="db-app">Application name <span class="muted">(blank = overseer)</span></label><input id="db-app" name="application_name" type="text" value="{{index $d.Form "application_name"}}"></div>
+<div class="field"><span>Password</span>: {{if .PasswordConfigured}}configured ({{if eq .PasswordSource "environment"}}from <span class="mono">OVERSEER_DATABASE_PASSWORD</span>{{else}}in the configuration file{{end}}){{else}}<strong>not configured</strong>{{end}}</div>
+{{template "fielderror" (index $.Errors "configuration")}}
+<button type="submit" data-pending="Saving…">Save database settings</button>
+</form></section>
+<section class="panel"><h2>Test database connection</h2>
+<p class="muted">Connects with the settings below without saving them. Leave the password blank to use the configured one; a password typed here is used for this test only and never stored.</p>
+<form method="post" action="/configuration/system/test">{{template "csrf" $.Shell.CSRF}}
+<input type="hidden" name="host" value="{{index $d.Form "host"}}"><input type="hidden" name="port" value="{{index $d.Form "port"}}">
+<input type="hidden" name="name" value="{{index $d.Form "name"}}"><input type="hidden" name="user" value="{{index $d.Form "user"}}">
+<input type="hidden" name="ssl_mode" value="{{index $d.Form "ssl_mode"}}"><input type="hidden" name="max_conns" value="{{index $d.Form "max_conns"}}">
+<input type="hidden" name="min_conns" value="{{index $d.Form "min_conns"}}"><input type="hidden" name="application_name" value="{{index $d.Form "application_name"}}">
+<p>Testing <span class="mono">{{index $d.Form "user"}}@{{index $d.Form "host"}}:{{index $d.Form "port"}}/{{index $d.Form "name"}}</span> (ssl {{index $d.Form "ssl_mode"}})</p>
+<div class="field"><label for="db-pass">Password for this test <span class="muted">(optional)</span></label><input id="db-pass" name="password" type="password" autocomplete="off"></div>
+<button type="submit" data-pending="Testing…">Test database</button>
+</form>
+{{with $d.Test}}{{if .OK}}<div class="banner" role="status"><strong>✓ Connected</strong> in {{.DurationMS}} ms — PostgreSQL {{.ServerVersion}}; {{if .SchemaVersion}}overseer schema version {{.SchemaVersion}}{{else}}no overseer schema yet (it is created at startup){{end}}.</div>
+{{else}}<div class="banner" role="alert"><strong>✗ Connection failed</strong> {{.Error}}</div>{{end}}{{end}}
+</section>
+{{else}}<p class="muted">The database configuration could not be read.</p>{{end}}
+{{end}}

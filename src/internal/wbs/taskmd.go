@@ -102,14 +102,24 @@ func ParseTasksMarkdown(md string) (*PlanCandidate, error) {
 		return nil, err
 	}
 	if len(d.Tasks) == 0 {
-		return nil, fmt.Errorf("%w: no \"## <KEY> — <name>\" task sections", ErrMalformedTasks)
+		return nil, fmt.Errorf("%w: no tasks (\"## <KEY> — <name>\" sections or \"task: <KEY> — <name>\" lines)", ErrMalformedTasks)
 	}
 	return d.Candidate(), nil
 }
 
-// ParseTasks parses a task file (TasksMarkdownFormat). A file without task
-// sections (e.g. an empty ACTIVE_TASK.md) has no tasks.
-func ParseTasks(md string) (*TaskDoc, error) {
+// ParseTasks parses a task file in either layout: the key:value format
+// when IsKeyValueTasks, the Markdown layout otherwise. Both are always
+// accepted, so a project switching formats keeps reading its existing
+// files. A file without tasks (e.g. an empty ACTIVE_TASK.md) has none.
+func ParseTasks(content string) (*TaskDoc, error) {
+	if IsKeyValueTasks(content) {
+		return ParseTasksKeyValue(content)
+	}
+	return parseTasksMarkdown(content)
+}
+
+// parseTasksMarkdown parses a task file in the Markdown layout.
+func parseTasksMarkdown(md string) (*TaskDoc, error) {
 	lines := strings.Split(strings.ReplaceAll(md, "\r\n", "\n"), "\n")
 	d := &TaskDoc{}
 	var t *Task

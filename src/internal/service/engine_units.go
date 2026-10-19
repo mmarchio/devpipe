@@ -391,6 +391,18 @@ func (e *Engine) handleUnitValidation(ctx context.Context, st *engineState, step
 		return e.requireRecovery(ctx, st, step, "acceptance criteria require manual review", ev)
 	}
 	if token == "FAIL" && st.statefileWorkflow() {
+		// The same failure over and over: the task is replanned (or, in a
+		// workflow without a replan state, stopped) instead of repeated.
+		if n, _, err := e.identicalFailures(ctx, st, st.unit.ID); err != nil {
+			return execution.StepResult{}, err
+		} else if n >= maxIdenticalFailures {
+			ev["identical_failures"] = n
+			if d, err := execution.RouteToken(st.machine, st.cur.Key, "REPLAN"); err == nil && d.Transition != nil {
+				return e.advance(ctx, st, step, "REPLAN", advanceOpts{Refs: refs, Outcome: "REPLAN"})
+			}
+			return e.requireRecovery(ctx, st, step, fmt.Sprintf("%s %d times for task %s (validation runs as %s): replan the task so it can pass, then resolve",
+				reasonIdenticalFailuresPrefix, n, wbs.UnitKey(st.unit), validationUser()), ev)
+		}
 		// An adopted task (DONE in the statefiles, not in ACTIVE_TASK.md)
 		// has no engineer working on it: it is redone, not repaired.
 		if active, problem := readTaskFile(st.cwd(), wbs.ActiveTaskFile, true); problem == "" && active.Find(wbs.UnitKey(st.unit)) == nil {

@@ -17,6 +17,7 @@ import (
 	"overseer/internal/persistence"
 	"overseer/internal/statefile"
 	"overseer/internal/wbs"
+	"overseer/internal/worker"
 )
 
 // ---------------------------------------------------------------------------
@@ -148,7 +149,7 @@ func (e *Engine) backlogCandidate(ctx context.Context, st *engineState, dispatch
 	rec.Markdown = &md
 	doc, err := wbs.ParseTasks(md)
 	if err == nil && len(doc.Tasks) == 0 {
-		err = fmt.Errorf("%w: no \"## <KEY> — <name>\" task sections", wbs.ErrMalformedTasks)
+		err = fmt.Errorf("%w: no tasks (\"## <KEY> — <name>\" sections or \"task: <KEY> — <name>\" lines)", wbs.ErrMalformedTasks)
 	}
 	if err != nil {
 		reject("MALFORMED_PLAN", wbs.BacklogFile+": "+err.Error())
@@ -334,7 +335,11 @@ func (e *Engine) rejectCandidate(ctx context.Context, st *engineState, step *per
 	if st.statefileWorkflow() {
 		// The planner is told why: the next PLAN command points at the
 		// problems (the worker's own checks are not the overseer's).
-		if err := writeStatefile(st.cwd(), wbs.PlanRejectedFile, renderPlanRejection(problems)); err != nil {
+		format, err := e.statefileFormat(ctx, st.rec.ProjectID)
+		if err != nil {
+			return execution.StepResult{}, err
+		}
+		if err := writeStatefile(st.cwd(), wbs.PlanRejectedFile, renderPlanRejection(problems, format)); err != nil {
 			return execution.StepResult{}, err
 		}
 	}
@@ -374,9 +379,23 @@ func (e *Engine) rejectCandidate(ctx context.Context, st *engineState, step *per
 }
 
 // renderPlanRejection renders PLAN_REJECTED.md: every problem of the
-// rejected plan, one per line.
-func renderPlanRejection(problems wbs.PlanProblems) string {
+// rejected plan, one per line, in the project's statefile format.
+func renderPlanRejection(problems wbs.PlanProblems, format worker.ResponseFormat) string {
 	var b strings.Builder
+	if syntaxFor(format).kv {
+		b.WriteString("title: Plan rejected\n")
+		fmt.Fprintf(&b, "note: The overseer rejected the plan in %s. Fix every problem below, then rewrite %s (and %s if the plan changes). "+
+			"Keeping the files as they are is rejected again.\n", wbs.BacklogFile, wbs.BacklogFile, wbs.PlanFile)
+		for _, p := range problems {
+			msg := strings.ReplaceAll(p.Message, "\n", " ")
+			if p.Unit != "" {
+				fmt.Fprintf(&b, "problem: %s %s: %s\n", p.Unit, p.Code, msg)
+			} else {
+				fmt.Fprintf(&b, "problem: %s: %s\n", p.Code, msg)
+			}
+		}
+		return b.String()
+	}
 	b.WriteString("# Plan rejected\n\n")
 	fmt.Fprintf(&b, "The overseer rejected the plan in `%s`. Fix every problem below, then rewrite `%s` (and `%s` if the plan changes). "+
 		"Keeping the files as they are is rejected again.\n\n", wbs.BacklogFile, wbs.BacklogFile, wbs.PlanFile)

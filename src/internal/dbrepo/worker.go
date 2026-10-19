@@ -206,10 +206,10 @@ func NewWorkerSettingsRepository(pool *pgxpool.Pool) *WorkerSettingsRepository {
 
 // Get returns stored settings or the defaults (stored=false).
 func (r *WorkerSettingsRepository) Get(ctx context.Context, projectID uuid.UUID) (worker.Settings, bool, error) {
-	var policy, send string
+	var policy, send, format string
 	var lease, wait int64
-	err := r.exec.QueryRow(ctx, `SELECT session_policy, concurrent_send, lease_ms, wait_ms FROM project_worker_settings WHERE project_id = $1`, projectID).
-		Scan(&policy, &send, &lease, &wait)
+	err := r.exec.QueryRow(ctx, `SELECT session_policy, concurrent_send, lease_ms, wait_ms, response_format FROM project_worker_settings WHERE project_id = $1`, projectID).
+		Scan(&policy, &send, &lease, &wait, &format)
 	if err != nil {
 		if errors.Is(TranslateDBError("get worker settings", err), persistence.ErrNotFound) {
 			return worker.DefaultSettings(), false, nil
@@ -217,16 +217,17 @@ func (r *WorkerSettingsRepository) Get(ctx context.Context, projectID uuid.UUID)
 		return worker.Settings{}, false, TranslateDBError("get worker settings", err)
 	}
 	return worker.Settings{SessionPolicy: worker.SessionPolicy(policy), ConcurrentSend: worker.ConcurrentSendPolicy(send),
-		Lease: time.Duration(lease) * time.Millisecond, Wait: time.Duration(wait) * time.Millisecond}, true, nil
+		Lease: time.Duration(lease) * time.Millisecond, Wait: time.Duration(wait) * time.Millisecond,
+		ResponseFormat: worker.ResponseFormat(format)}, true, nil
 }
 
 // Upsert stores settings.
 func (r *WorkerSettingsRepository) Upsert(ctx context.Context, projectID uuid.UUID, s worker.Settings) error {
-	_, err := r.exec.Exec(ctx, `INSERT INTO project_worker_settings (project_id, session_policy, concurrent_send, lease_ms, wait_ms, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now())
+	_, err := r.exec.Exec(ctx, `INSERT INTO project_worker_settings (project_id, session_policy, concurrent_send, lease_ms, wait_ms, response_format, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, now())
 		ON CONFLICT (project_id) DO UPDATE SET session_policy = EXCLUDED.session_policy, concurrent_send = EXCLUDED.concurrent_send,
-		  lease_ms = EXCLUDED.lease_ms, wait_ms = EXCLUDED.wait_ms, updated_at = now()`,
-		projectID, string(s.SessionPolicy), string(s.ConcurrentSend), s.Lease.Milliseconds(), s.Wait.Milliseconds())
+		  lease_ms = EXCLUDED.lease_ms, wait_ms = EXCLUDED.wait_ms, response_format = EXCLUDED.response_format, updated_at = now()`,
+		projectID, string(s.SessionPolicy), string(s.ConcurrentSend), s.Lease.Milliseconds(), s.Wait.Milliseconds(), string(s.ResponseFormat.OrDefault()))
 	if err != nil {
 		return TranslateDBError("upsert worker settings", err)
 	}

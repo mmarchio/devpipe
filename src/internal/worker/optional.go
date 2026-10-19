@@ -26,3 +26,22 @@ type ConnectionObserver func(from, to ConnectionState, err error)
 type Observable interface {
 	OnConnectionChange(ConnectionObserver)
 }
+
+// SessionManager is implemented by workers whose provider keeps its own
+// server-side sessions: their counters can be read, and a session the
+// overseer has finished with can be deleted.
+type SessionManager interface {
+	SessionStats(ctx context.Context, sessionID string) (SessionStats, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+// SessionStats are a provider session's running counters (totals over the
+// session, not the current context size).
+type SessionStats struct {
+	Messages        int64
+	ToolCalls       int64
+	ModelCalls      int64
+	InputTokens     int64
+	OutputTokens    int64
+	CacheReadTokens int64
+}

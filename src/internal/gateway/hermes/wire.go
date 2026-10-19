@@ -13,7 +13,7 @@ import (
 //
 //	GET  /v1/models            reachability / credential probe (handshake)
 //	POST /v1/chat/completions  every message send:
-//	                           {"model", "messages":[{"role","content"}], "stream":false}
+//	                           {"model", "messages":[{"role","content"}], "stream":false[, "grammar"]}
 //	                           (X-Request-ID, X-Overseer-Dispatch-Key, X-Overseer-Session-ID,
 //	                           X-Overseer-Metadata)
 //
@@ -50,6 +50,9 @@ type ChatRequest struct {
 	Model    string        `json:"model"`
 	Messages []ChatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
+	// Grammar is a GBNF grammar constraining the reply (omitted when
+	// empty).
+	Grammar string `json:"grammar,omitempty"`
 }
 
 // ChatUsage is the OpenAI token usage block.
@@ -149,6 +152,7 @@ type GatewayRequest struct {
 	RequestID string            `json:"request_id"`
 	Model     string            `json:"model,omitempty"`
 	Content   string            `json:"content"`
+	Grammar   string            `json:"grammar,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
@@ -205,6 +209,10 @@ const (
 	// HeaderMetadata carries the request metadata as a JSON object; the
 	// body stays the plain chat completions shape.
 	HeaderMetadata = "X-Overseer-Metadata"
+	// HeaderHermesSessionID files a request under a Hermes session (the
+	// gateway's session continuity header). The overseer still sends the
+	// full history; Hermes stores it under this id without duplicating it.
+	HeaderHermesSessionID = "X-Hermes-Session-Id"
 )
 
 // Translate maps a generic request to the gateway request (WBS 12.11):
@@ -238,7 +246,7 @@ func Translate(req worker.WorkerRequest, cfg worker.WorkerConfig) (GatewayReques
 	if req.Metadata.RuntimeStateID.String() != "00000000-0000-0000-0000-000000000000" {
 		md["runtime_state_id"] = req.Metadata.RuntimeStateID.String()
 	}
-	return GatewayRequest{RequestID: req.RequestID.String(), Model: cfg.Model, Content: req.Prompt.Content, Metadata: md}, nil
+	return GatewayRequest{RequestID: req.RequestID.String(), Model: cfg.Model, Content: req.Prompt.Content, Grammar: req.Grammar, Metadata: md}, nil
 }
 
 func usageFrom(u *GatewayUsage) worker.WorkerUsage {
@@ -263,4 +271,19 @@ func capabilitiesFrom(h GatewayHandshake) worker.WorkerCapabilities {
 	return worker.WorkerCapabilities{Provider: worker.ProviderHermesGateway, ProviderVersion: h.ProviderVersion, ProtocolVersion: h.ProtocolVersion,
 		Sessions: c.Sessions, NewSession: c.NewSession, ChangeDirectory: c.ChangeDirectory, ContextTelemetry: c.ContextTelemetry,
 		Streaming: c.Streaming, Cancellation: c.Cancellation, ToolExecution: c.ToolExecution}
+}
+
+// PathSessions is the Hermes session resource (GET / DELETE {id}).
+const PathSessions = "/api/sessions/"
+
+// HermesSessionStats is a Hermes session's counters (GET /api/sessions/{id}).
+type HermesSessionStats struct {
+	ID               string `json:"id"`
+	MessageCount     int64  `json:"message_count"`
+	ToolCallCount    int64  `json:"tool_call_count"`
+	APICallCount     int64  `json:"api_call_count"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
 }

@@ -113,6 +113,19 @@ func TestP17147Acceptance(t *testing.T) {
 	}
 	pid := strings.TrimPrefix(final, "/projects/")
 	r.pid, r.dir, r.phases = uuid.MustParse(pid), dir, map[int]uuid.UUID{}
+	// The scripted run below exercises the composed-prompt workflow
+	// (CONTINUE_DECISION, RESET_SESSION, VALIDATION_RESULT), while web
+	// project creation installs the default statefile workflow: swap it.
+	r.exec(t, "DELETE FROM state_machines WHERE project_id = '"+pid+"'")
+	r.roles = map[string]uuid.UUID{}
+	for _, k := range []string{"PLANNER", "ARCHITECT", "ENGINEER", "TESTER", "PROJECT_MANAGER"} {
+		var id uuid.UUID
+		if err := r.h.DBScan(ctx, "SELECT id FROM roles WHERE project_id = '"+pid+"' AND key = '"+k+"'", &id); err != nil {
+			t.Fatalf("role %s: %v", k, err)
+		}
+		r.roles[k] = id
+	}
+	r.installWorkflow(t, false)
 	p := "/projects/" + pid
 	var st map[string]any
 	b.getJSON("/api/v1"+p+"/settings", &st)

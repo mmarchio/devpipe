@@ -67,8 +67,8 @@ func TestP607MigrationApplied(t *testing.T) {
 	}
 	// Bumped 23 -> 24 by P6-07 (migration 00024, state_role_assignments)
 	// — accepted contract change, not a weakened test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	var n int
 	if err := h.DBScan(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'state_role_assignments'", &n); err != nil {

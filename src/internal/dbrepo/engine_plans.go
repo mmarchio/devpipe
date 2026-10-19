@@ -238,12 +238,45 @@ func (r *EngineRepository) LastRecoveryResolved(ctx context.Context, ex persiste
 // recovery whose attempt limit is limit, or nil.
 func (r *EngineRepository) LastLimitReset(ctx context.Context, ex persistence.Executor, executionID uuid.UUID, limit string) (*time.Time, error) {
 	var at *time.Time
-	err := r.ex(ex).QueryRow(ctx, `SELECT max(created_at) FROM execution_events WHERE execution_id = $1 AND type = $2
-		AND payload->>'limit' = $3`, executionID, string(execution.EventRecoveryResolved), limit).Scan(&at)
+	err := r.ex(ex).QueryRow(ctx, `SELECT max(created_at) FROM execution_events WHERE execution_id = $1
+		AND ((type = $2 AND payload->>'limit' = $3) OR (type = $4 AND payload->'resets' ? $3))`,
+		executionID, string(execution.EventRecoveryResolved), limit, string(execution.EventUnitReplanned)).Scan(&at)
 	if err != nil {
 		return nil, TranslateDBError("last limit reset", err)
 	}
 	return at, nil
+}
+
+// ReplanUnit replaces a unit's specification (objective, instructions,
+// criteria, required tests, validation, checks, paths) and deletes its
+// manual-criterion approvals, which referred to the old criteria.
+func (r *EngineRepository) ReplanUnit(ctx context.Context, ex persistence.Executor, unitID uuid.UUID, spec *wbs.WorkUnitSpecification) error {
+	val, checks, paths, err := phase16SpecJSON(spec)
+	if err != nil {
+		return err
+	}
+	acc, err := specJSON(spec.AcceptanceCriteria)
+	if err != nil {
+		return err
+	}
+	req, err := specJSON(spec.RequiredTests)
+	if err != nil {
+		return err
+	}
+	x := r.ex(ex)
+	tag, err := x.Exec(ctx, `UPDATE work_units SET objective = $2, implementation_instructions = $3, acceptance_criteria = $4,
+		required_tests = $5, validation_commands = $6, acceptance_checks = $7, paths = $8, updated_at = now() WHERE id = $1`,
+		unitID, spec.Objective, spec.ImplementationInstructions, acc, req, val, checks, paths)
+	if err != nil {
+		return TranslateDBError("replan work unit", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return persistence.ErrNotFound
+	}
+	if _, err := x.Exec(ctx, `DELETE FROM acceptance_approvals WHERE work_unit_id = $1`, unitID); err != nil {
+		return TranslateDBError("drop replanned unit approvals", err)
+	}
+	return nil
 }
 
 // CreatePlanWithUnits inserts a plan, its units and their dependencies in

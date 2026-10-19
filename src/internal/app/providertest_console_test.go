@@ -59,6 +59,7 @@ func TestProviderTestSendsCapabilitiesPrompt(t *testing.T) {
 		WorkerProviders:      map[string]config.WorkerProviderConfig{"hermes": {Kind: config.WorkerKindHermesGateway, Endpoint: gw.URL}},
 		CompressionProviders: map[string]config.CompressionProviderConfig{"local": {Kind: "openai_compatible", BaseURL: llm.URL + "/v1"}},
 	}}
+	a.providers = config.NewProviderStore(a.cfg)
 	ctx := t.Context()
 	res, found := a.providerTest(ctx, "worker", "hermes", "swift-qwen-3.8")
 	if !found || !res.OK || res.Response != "I can edit files." {

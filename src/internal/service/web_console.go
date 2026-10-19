@@ -928,6 +928,10 @@ func (s *ConsoleReadService) WorkerPanel(ctx context.Context, projectID uuid.UUI
 		if sess, err := s.d.Workers.Session(ctx, projectID, *v.SessionID); err == nil && sess != nil {
 			p.ProviderSess, p.CreatedAt, p.LastActivity = sess.ProviderSessionID, tptr(sess.CreatedAt), tptr(sess.LastSeenAt)
 		}
+		if st := s.d.Workers.ProviderSessionStats(ctx, projectID); st != nil {
+			p.ProviderStats = &readmodel.ProviderSessionStats{Messages: st.Messages, ToolCalls: st.ToolCalls, ModelCalls: st.ModelCalls,
+				InputTokens: st.InputTokens, OutputTokens: st.OutputTokens, CacheReadTokens: st.CacheReadTokens}
+		}
 	}
 	return p, nil
 }

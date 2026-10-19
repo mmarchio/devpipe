@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -76,10 +77,57 @@ func (s *WorkerService) NewSession(ctx context.Context, projectID uuid.UUID) (*p
 	}
 	if prevID != nil {
 		s.event(ctx, projectID, prevID, nil, worker.EventSessionReset, map[string]any{"provider_session_id": prev.ProviderSessionID, "replaced_by": rec.ID.String()})
+		s.deleteProviderSession(ctx, projectID, pw.w, prev.ProviderSessionID)
 	}
 	id := rec.ID
 	s.event(ctx, projectID, &id, nil, worker.EventSessionCreated, map[string]any{"provider_session_id": info.ID, "policy": string(st.SessionPolicy)})
 	return rec, nil
+}
+
+// providerSessionTimeout bounds one provider session API call.
+const providerSessionTimeout = 10 * time.Second
+
+// deleteProviderSession removes a replaced (completed) session from the
+// provider when it keeps server-side sessions. Best effort: a failure is
+// logged and never blocks the new session.
+func (s *WorkerService) deleteProviderSession(ctx context.Context, projectID uuid.UUID, w worker.Worker, providerSessionID string) {
+	m, ok := w.(worker.SessionManager)
+	if !ok || providerSessionID == "" {
+		return
+	}
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerSessionTimeout)
+	defer cancel()
+	if err := m.DeleteSession(dctx, providerSessionID); err != nil {
+		s.d.Logger.Warn("completed worker session not deleted at the provider", "project_id", projectID.String(),
+			"provider_session_id", providerSessionID, "error", err.Error())
+		return
+	}
+	s.d.Logger.Info("completed worker session deleted at the provider", "project_id", projectID.String(), "provider_session_id", providerSessionID)
+}
+
+// ProviderSessionStats returns the provider's counters for the project's
+// active session (nil when the provider keeps no server-side sessions, no
+// session is active, or the provider cannot report).
+func (s *WorkerService) ProviderSessionStats(ctx context.Context, projectID uuid.UUID) *worker.SessionStats {
+	sess, err := s.ActiveSession(ctx, projectID)
+	if err != nil || sess == nil || sess.ProviderSessionID == "" {
+		return nil
+	}
+	pw, err := s.worker(ctx, projectID)
+	if err != nil {
+		return nil
+	}
+	m, ok := pw.w.(worker.SessionManager)
+	if !ok {
+		return nil
+	}
+	sctx, cancel := context.WithTimeout(ctx, providerSessionTimeout)
+	defer cancel()
+	st, err := m.SessionStats(sctx, sess.ProviderSessionID)
+	if err != nil {
+		return nil
+	}
+	return &st
 }
 
 // ChangeDirectory sets the active session's working directory (WBS 12.23-

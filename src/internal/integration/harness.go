@@ -279,9 +279,15 @@ func parseDSNFields(t *testing.T, dsn string) (string, int, string, string, stri
 // sequentially; set it with captureLogs.
 var harnessLogWriter io.Writer
 
+// harnessConfigPath, when set by a test, is the configuration file the
+// harness app's System / Models categories edit. Unset, edits fail: a
+// test never touches the developer's OVERSEER_CONFIG_PATH.
+var harnessConfigPath string
+
 func newHarnessApp(cfg config.Config) *app.App {
 	opts := app.DefaultOptions()
 	opts.LogWriter = harnessLogWriter
+	opts.ConfigPath = harnessConfigPath
 	return app.NewWith(cfg, opts)
 }
 

@@ -143,3 +143,46 @@ func TestP19UnrecordedTestResent(t *testing.T) {
 		t.Fatalf("resends %q", team.resends)
 	}
 }
+
+// A task the overseer's validation fails the same way three times is
+// replanned by the architect with the failure in hand; an unchanged replan
+// is resent; the replanned definition replaces the stored one, the engineer
+// implements it, and it passes.
+func TestP19RepeatedFailureReplansTask(t *testing.T) {
+	r := p16NewRigWith(t, p16Options{statefile: true})
+	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}, replanCheck: "A2", replanNoopFirst: true}
+	r.g.Responder = team.respond
+	r.setCheck(t, "A", 1) // the original validation can never pass
+	res, err := r.eng().Run(context.Background(), r.execID, 300)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, p16Trace(res))
+	}
+	if st := r.execStatus(t); st != string(execution.ExecutionCompleted) {
+		t.Fatalf("execution %s, recovery %q\ncommands %q\ntrace: %s", st, r.recoveryReason(t), team.commandLines(), p16Trace(res))
+	}
+	team.mu.Lock()
+	replans := append([]string(nil), team.replans...)
+	team.mu.Unlock()
+	if len(replans) != 2 {
+		t.Fatalf("%d replan commands, want 2 (the unchanged first answer is resent)", len(replans))
+	}
+	first := replans[0]
+	for _, want := range []string{"have the architect replan task A\n", "failed the overseer's validation the same way 3 times", "check A failed: expected behaviour missing",
+		"Expected format:"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("replan command lacks %q:\n%s", want, first)
+		}
+	}
+	if !strings.Contains(replans[1], "is unchanged") {
+		t.Fatalf("the unchanged replan was not resent with the problem:\n%s", replans[1])
+	}
+	if n := team.countCmd("implement task A"); n != 4 {
+		t.Fatalf("implement task A sent %d times, want 4 (3 before the replan, 1 after)", n)
+	}
+	if n := r.count(t, "SELECT count(*) FROM work_units WHERE unit_key = 'A' AND validation_commands::text LIKE '%A2%' AND status = 'DONE'"); n != 1 {
+		t.Fatalf("task A's stored validation was not replaced (%d)", n)
+	}
+	if n := r.count(t, "SELECT count(*) FROM execution_events WHERE type = 'WORK_UNIT_REPLANNED' AND execution_id = '"+r.execID.String()+"'"); n != 1 {
+		t.Fatalf("%d replan events, want 1", n)
+	}
+}

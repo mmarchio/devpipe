@@ -297,6 +297,9 @@ type EngineRepository interface {
 	// was last resolved in the execution (nil when never): the limit's
 	// counter counts from there.
 	LastLimitReset(ctx context.Context, ex Executor, executionID uuid.UUID, limit string) (*time.Time, error)
+	// ReplanUnit replaces a unit's specification with its replanned one
+	// and drops its manual-criterion approvals (the criteria changed).
+	ReplanUnit(ctx context.Context, ex Executor, unitID uuid.UUID, spec *wbs.WorkUnitSpecification) error
 	// LastRecoveryResolved returns when the execution's latest recovery
 	// with the given reason was resolved (nil when never).
 	LastRecoveryResolved(ctx context.Context, ex Executor, executionID uuid.UUID, reason string) (*time.Time, error)

@@ -46,18 +46,26 @@ type Options struct {
 	// LogWriter receives the structured log (default os.Stderr; tests
 	// capture it to scan for secrets).
 	LogWriter io.Writer
+	// ConfigPath is the configuration file the console's System and
+	// Models categories edit (default: OVERSEER_CONFIG_PATH).
+	ConfigPath string
 }
 
 // DefaultOptions returns the repository-standard layout.
 func DefaultOptions() Options {
 	return Options{
 		MigrationsDir: "migrations",
+		ConfigPath:    os.Getenv("OVERSEER_CONFIG_PATH"),
 	}
 }
 
 // App is the application lifecycle: it owns every component in startup
 // order and tears them down in reverse order.
 type App struct {
+	// providers is the live worker / compression provider configuration
+	// (edited in the console without a restart); a.cfg keeps the
+	// configuration the process started with.
+	providers *config.ProviderStore
 	// Phase 18: instance identity, startup configuration snapshot and the
 	// schema version the process runs against.
 	instanceID     string
@@ -147,12 +155,12 @@ func (a *App) Compression() *service.CompressionService { return a.compressionSv
 
 // New builds an App from validated configuration with the standard layout.
 func New(cfg config.Config) *App {
-	return &App{cfg: cfg, opts: resolveOptions(DefaultOptions()), secrets: newSecretSource()}
+	return &App{cfg: cfg, providers: config.NewProviderStore(cfg), opts: resolveOptions(DefaultOptions()), secrets: newSecretSource()}
 }
 
 // NewWith builds an App with explicit bootstrap options.
 func NewWith(cfg config.Config, opts Options) *App {
-	return &App{cfg: cfg, opts: resolveOptions(opts), secrets: newSecretSource()}
+	return &App{cfg: cfg, providers: config.NewProviderStore(cfg), opts: resolveOptions(opts), secrets: newSecretSource()}
 }
 
 // resolveOptions anchors relative directories at the module root so the
@@ -541,7 +549,7 @@ func (a *App) Start(ctx context.Context) error {
 		dbrepo.NewCompressionSettingsRepository(rawPool),
 		dbrepo.NewCompressionInstructionRepository(rawPool),
 		dbrepo.NewCompressionRepository(rawPool),
-		compressionprovider.NewFactory(a.cfg.CompressionProviders).WithResolver(a.secrets.Resolve).WithDialControl(endpointDialControl(a.cfg)),
+		compressionprovider.NewFactory(nil).WithSource(a.providers.Compressors).WithResolver(a.secrets.Resolve).WithDialControl(endpointDialControl(a.cfg)),
 	).WithTxPool(rawPool).WithAvailability(a.compressionAvailabilityConfig())
 	if err := web.RegisterCompressionRoutes(router, a.compressionSvc); err != nil {
 		db.Close()
@@ -594,7 +602,6 @@ func (a *App) Start(ctx context.Context) error {
 	).WithSnapshots(dbrepo.NewContextSnapshotRepository(rawPool)).
 		WithFileVersions(dbrepo.NewStateFileVersionRepository(rawPool)).
 		WithTxPool(rawPool)
-	providers := a.cfg.CompressionProviders
 	a.precomputeSvc = service.NewPrecomputeService(service.PrecomputeDeps{
 		Settings:     dbrepo.NewPrecomputeSettingsRepository(rawPool),
 		Jobs:         dbrepo.NewPrecomputeJobRepository(rawPool),
@@ -625,7 +632,7 @@ func (a *App) Start(ctx context.Context) error {
 		Cache:       a.promptCacheSvc,
 		Compression: a.compressionSvc,
 		ProviderLocal: func(name string) bool {
-			p, ok := providers[name]
+			p, ok := a.providers.Compressor(name)
 			return ok && precompute.IsLocalURL(p.BaseURL)
 		},
 	})
@@ -641,11 +648,10 @@ func (a *App) Start(ctx context.Context) error {
 	// knows the concrete Hermes adapter (WBS 12.90).
 	workerRegistry := worker.NewProviderRegistry()
 	hermes.Register(workerRegistry, a.secrets.Resolve, hermes.WithDialControl(endpointDialControl(a.cfg)))
-	workerProviders := a.cfg.WorkerProviders
 	a.workerSvc = service.NewWorkerService(service.WorkerDeps{
 		Factory: workerRegistry,
 		Providers: func(name string) (worker.WorkerProvider, json.RawMessage, time.Duration, bool) {
-			p, ok := workerProviders[name]
+			p, ok := a.providers.Worker(name)
 			if !ok || p.Kind != config.WorkerKindHermesGateway {
 				return "", nil, 0, false
 			}
@@ -1126,8 +1132,6 @@ func (a *App) startBootstrap(ctx context.Context, router *web.Router, lifecycleS
 		dbrepo.NewRoleAllowedStateRepository(pool),
 	)
 	protoRepo := dbrepo.NewResponseProtocolRepository(pool)
-	workerProviders := a.cfg.WorkerProviders
-	compProviders := a.cfg.CompressionProviders
 	a.bootstrapSvc = service.NewBootstrapService(service.BootstrapDeps{
 		Build:           service.BuildInfo{AppVersion: Version, SchemaVersion: a.schemaVersion, ConfigHash: a.configSnapshot.Hash},
 		Pool:            pool,
@@ -1168,7 +1172,7 @@ func (a *App) startBootstrap(ctx context.Context, router *web.Router, lifecycleS
 		Identifier:    a.repoInspector(),
 		Identities:    dbrepo.NewRepositoryIdentityStore(pool),
 		WorkerProvider: func(name string) (service.WorkerProviderInfo, bool) {
-			p, ok := workerProviders[name]
+			p, ok := a.providers.Worker(name)
 			if !ok {
 				return service.WorkerProviderInfo{}, false
 			}
@@ -1177,7 +1181,7 @@ func (a *App) startBootstrap(ctx context.Context, router *web.Router, lifecycleS
 				AllowedRoots: append([]string(nil), p.AllowedRoots...), Capabilities: []string{"sessions", "cwd", "usage"}}, true
 		},
 		CompressionProvider: func(name string) (service.CompressionProviderInfo, bool) {
-			p, ok := compProviders[name]
+			p, ok := a.providers.Compressor(name)
 			if !ok {
 				return service.CompressionProviderInfo{}, false
 			}

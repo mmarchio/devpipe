@@ -796,3 +796,46 @@ func TestP1240Registry(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// A request's GBNF grammar is sent as the chat completion's "grammar"
+// string (and omitted when empty, see TestP1232ChatCompletionsWire).
+func TestHermesSendsGrammar(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			io.WriteString(w, `{"object":"list","data":[{"id":"hermes-agent"}]}`)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		var body map[string]any
+		json.Unmarshal(raw, &body)
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		io.WriteString(w, `{"id":"c","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"summary: done\nblocker: none\n"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	w, err := hermes.New(cfgFor(srv.URL, `,"auth_secret_ref":"HERMES_TOKEN"`), func(string) (string, bool) { return "tok-1", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close(context.Background())
+	ctx := context.Background()
+	if err := w.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.NewSession(ctx, worker.NewSessionRequest{ProjectID: uuid.New()}); err != nil {
+		t.Fatal(err)
+	}
+	req := workertest.Request(uuid.New(), "Execute task 1.1.2 and update the statefile.")
+	req.Grammar = worker.KeyValueGrammar
+	if _, err := w.Send(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 1 || bodies[0]["grammar"] != worker.KeyValueGrammar {
+		t.Fatalf("grammar not sent: %v", bodies)
+	}
+}

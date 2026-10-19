@@ -11,9 +11,10 @@ import (
 	"testing"
 
 	"overseer/internal/execution"
-	"overseer/internal/service"
 	"overseer/internal/gateway/hermes/hermestest"
+	"overseer/internal/service"
 	"overseer/internal/wbs"
+	"overseer/internal/worker"
 )
 
 // sfTeam simulates the Hermes team of the statefile workflow: it acts on
@@ -52,9 +53,25 @@ type sfTeam struct {
 	alwaysFail string
 	// skills are the output-format skill commands received.
 	skills []string
+	// replans are the replan commands received; replanCheck is the check
+	// the architect gives a replanned task; replanNoopFirst answers the
+	// first replan without changing anything.
+	replans         []string
+	replanCheck     string
+	replanNoopFirst bool
 	// silentTests answers this many test commands without touching
 	// ACTIVE_TASK.md (the result reported only in the reply).
 	silentTests int
+	// kv writes every task file and the plan in the key:value format.
+	kv bool
+}
+
+// doc renders a statefile with its title in the team's format.
+func (s *sfTeam) doc(title, body string) string {
+	if s.kv {
+		return "title: " + title + "\n\n" + body
+	}
+	return "# " + title + "\n\n" + body
 }
 
 // commandLines lists the commands received by their first line, the
@@ -81,6 +98,15 @@ func badActive(section string) string { return strings.Replace(section, "## ", "
 type sfTask struct {
 	key, deps string
 	status    string
+	// check is the validation check the task runs (default: its key).
+	check string
+}
+
+func (t sfTask) checkName() string {
+	if t.check != "" {
+		return t.check
+	}
+	return t.key
 }
 
 func (s *sfTeam) file(rel string) string { return filepath.Join(s.dir, rel) }
@@ -105,14 +131,19 @@ func (s *sfTeam) section(t sfTask, met bool) string {
 	if deps == "" {
 		deps = "none"
 	}
+	if s.kv {
+		return fmt.Sprintf("task: %s — Task %s\nstatus: %s\nkind: ATOMIC\ndepends_on: %s\nsingle_invocation: yes\nobjective: Deliver %s.\n"+
+			"criterion: %s [COMMAND] %s behaves `%s %s`\ncriterion: %s [MANUAL] %s reviewed\nvalidation: `%s %s`\n\n",
+			t.key, t.key, t.status, deps, t.key, box, t.key, s.script, t.checkName(), box, t.key, s.script, t.checkName())
+	}
 	return fmt.Sprintf("## %s — Task %s\nStatus: %s\nKind: ATOMIC\nDepends on: %s\nSingle invocation: yes\n\n### Objective\nDeliver %s.\n\n"+
 		"### Acceptance criteria\n- %s [COMMAND] %s behaves `%s %s`\n- %s [MANUAL] %s reviewed\n\n### Validation\n- `%s %s`\n\n",
-		t.key, t.key, t.status, deps, t.key, box, t.key, s.script, t.key, box, t.key, s.script, t.key)
+		t.key, t.key, t.status, deps, t.key, box, t.key, s.script, t.checkName(), box, t.key, s.script, t.checkName())
 }
 
 func (s *sfTeam) backlog() {
 	var b strings.Builder
-	b.WriteString("# Backlog — phase 1\n\n")
+	b.WriteString(s.doc("Backlog — phase 1", ""))
 	for _, t := range s.tasks {
 		b.WriteString(s.section(t, t.status == wbs.TaskStatusDone))
 	}
@@ -140,12 +171,22 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 	// first line.
 	cmd, problem, _ := strings.Cut(m.Content, "\n")
 	skill := strings.HasPrefix(cmd, "create the ") && strings.HasSuffix(cmd, "-output-format skill")
-	if problem != "" && !strings.HasPrefix(cmd, "plan phase") && !skill {
+	if problem != "" && !strings.HasPrefix(cmd, "plan phase") && !skill && !strings.HasPrefix(cmd, "have the architect replan task ") {
 		s.resends = append(s.resends, m.Content)
 	}
 	switch {
 	case skill:
 		s.skills = append(s.skills, m.Content)
+	case strings.HasPrefix(cmd, "have the architect replan task "):
+		s.replans = append(s.replans, m.Content)
+		if s.replanNoopFirst && len(s.replans) == 1 {
+			break
+		}
+		key := strings.TrimPrefix(cmd, "have the architect replan task ")
+		t := s.find(key)
+		t.check, t.status = s.replanCheck, "ACTIVE"
+		s.write(wbs.ActiveTaskFile, s.doc("Active task", "")+s.section(*t, false))
+		s.backlog()
 	case strings.HasPrefix(m.Content, "plan phase 1"):
 		s.planned++
 		_, rejErr := os.Stat(s.file(wbs.PlanRejectedFile))
@@ -164,12 +205,16 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 		if err != nil {
 			s.t.Errorf("the WBS was not loaded before planning: %v", err)
 		}
-		s.write(wbs.PlanFile, "# Plan — phase 1\n\nFrom the WBS:\n"+string(wbsFile))
+		if s.kv {
+			s.write(wbs.PlanFile, "title: Plan — phase 1\nstep: deliver the phase WBS\n")
+		} else {
+			s.write(wbs.PlanFile, "# Plan — phase 1\n\nFrom the WBS:\n"+string(wbsFile))
+		}
 		s.tasks = []sfTask{{key: "A", status: "TODO"}, {key: "B", deps: "A", status: "TODO"}}
 		if s.priorWork {
 			s.tasks[0].status, s.tasks[1].status = wbs.TaskStatusDone, "ACTIVE"
-			s.write(wbs.ArchiveFile, "# Task archive\n\n"+s.section(s.tasks[0], true))
-			s.write(wbs.ActiveTaskFile, "# Active task\n\n"+s.section(s.tasks[1], false))
+			s.write(wbs.ArchiveFile, s.doc("Task archive", "")+s.section(s.tasks[0], true))
+			s.write(wbs.ActiveTaskFile, s.doc("Active task", "")+s.section(s.tasks[1], false))
 		}
 		s.backlog()
 		if s.badFirstPlan && s.planned == 1 {
@@ -186,7 +231,7 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 			if t.status == wbs.TaskStatusComplete {
 				t.status = wbs.TaskStatusDone
 				if len(archive) == 0 {
-					archive = []byte("# Task archive\n\n")
+					archive = []byte(s.doc("Task archive", ""))
 				}
 				archive = append(archive, s.section(*t, true)...)
 				s.write(wbs.ArchiveFile, string(archive))
@@ -195,11 +240,14 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 		}
 		if len(active) == 0 {
 			next := "# Active task\n\nNo active task.\n"
+			if s.kv {
+				next = "title: Active task\n"
+			}
 			for i := range s.tasks {
 				t := &s.tasks[i]
 				if t.status == "TODO" && (t.deps == "" || s.find(t.deps).status == wbs.TaskStatusDone) {
 					t.status = "ACTIVE"
-					next = "# Active task\n\n" + s.section(*t, false)
+					next = s.doc("Active task", "") + s.section(*t, false)
 					break
 				}
 			}
@@ -213,7 +261,7 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 			// unless it stays bad).
 			for _, t := range s.tasks {
 				if t.status == "ACTIVE" {
-					content := "# Active task\n\n" + s.section(t, false)
+					content := s.doc("Active task", "") + s.section(t, false)
 					if s.keepBadActive {
 						content = badActive(s.section(t, false))
 					}
@@ -237,11 +285,16 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 			// A failing test is noted under ### Instructions (the result is
 			// recorded even though the status stays).
 			note := fmt.Sprintf("### Instructions\nTest round %d: a criterion is not met.\n\n### Acceptance criteria", s.tested[key])
-			s.write(wbs.ActiveTaskFile, "# Active task\n\n"+strings.Replace(s.section(*t, false), "### Acceptance criteria", note, 1))
+			anchor := "### Acceptance criteria"
+			if s.kv {
+				note = fmt.Sprintf("instructions: Test round %d: a criterion is not met.\ncriterion:", s.tested[key])
+				anchor = "criterion:"
+			}
+			s.write(wbs.ActiveTaskFile, s.doc("Active task", "")+strings.Replace(s.section(*t, false), anchor, note, 1))
 			break
 		}
 		t.status = wbs.TaskStatusComplete
-		s.write(wbs.ActiveTaskFile, "# Active task\n\n"+s.section(*t, true))
+		s.write(wbs.ActiveTaskFile, s.doc("Active task", "")+s.section(*t, true))
 		s.backlog()
 	default:
 		s.t.Errorf("unexpected command %q", m.Content)
@@ -283,7 +336,7 @@ func TestP19StatefileWorkflow(t *testing.T) {
 		"create the output-format skill", // every execution starts with it
 		"plan phase 1",
 		"have the project manager perform acceptance tasks", // loads A
-		"implement task A", "test task A", // a criterion unmet
+		"implement task A", "test task A",                   // a criterion unmet
 		"implement task A", "test task A", // COMPLETE → overseer validation
 		"have the project manager perform acceptance tasks", // archives A, loads B
 		"implement task B", "test task B",
@@ -303,7 +356,7 @@ func TestP19StatefileWorkflow(t *testing.T) {
 	skills := append([]string(nil), team.skills...)
 	team.mu.Unlock()
 	if len(skills) != 1 || !strings.HasPrefix(skills[0], "create the "+skill+" skill\n\nCreate this Hermes skill now") ||
-		!strings.Contains(skills[0], "name: "+skill+"\n") || !strings.Contains(skills[0], service.TaskFileFormat()) {
+		!strings.Contains(skills[0], "name: "+skill+"\n") || !strings.Contains(skills[0], service.TaskFileFormat(worker.FormatMarkdown)) {
 		t.Fatalf("skill commands for %s: %q", skill, skills)
 	}
 	// The context is cleared (new session, then "cd <working directory>")
@@ -342,6 +395,18 @@ func TestP19StatefileWorkflow(t *testing.T) {
 		if op != "new" {
 			prev = op
 		}
+	}
+	// Each worker session is its own Hermes session; a replaced session is
+	// completed and deleted from Hermes, so only the active one remains.
+	var order []string
+	for _, id := range sess {
+		if len(order) == 0 || order[len(order)-1] != id {
+			order = append(order, id)
+		}
+	}
+	if del, left := r.g.DeletedSessions(), r.g.HermesSessions(); strings.Join(del, ",") != strings.Join(order[:len(order)-1], ",") ||
+		len(left) != 1 || left[0] != order[len(order)-1] {
+		t.Fatalf("Hermes sessions deleted %q, remaining %q; sessions in order %q", del, left, order)
 	}
 	for _, id := range []string{sess[0], sess[1], sess[3], sess[8]} {
 		if cwd := r.g.SessionCWD(id); cwd == nil || *cwd != r.dir {
@@ -518,5 +583,70 @@ func TestP19StatefileWorkflowResendsWithErrors(t *testing.T) {
 		!strings.Contains(team.resends[0], "statefiles/HERMES.md") || !strings.Contains(team.resends[0], "Expected format:\n\n") ||
 		!strings.Contains(team.resends[0], "## <KEY> — <task name>\nStatus: TODO | ACTIVE | COMPLETE | DONE") {
 		t.Fatalf("resends %q", team.resends)
+	}
+}
+
+// TestP19StatefileWorkflowKeyValue — a key:value project runs the whole
+// statefile workflow with every task file and the plan in the key:value
+// format: HERMES.md and the skill describe that format, the overseer
+// parses the team's key:value files (including a failed test noted in an
+// instructions: line) and the execution completes.
+func TestP19StatefileWorkflowKeyValue(t *testing.T) {
+	r := p16NewRigWith(t, p16Options{statefile: true, noBootstrap: true})
+	r.exec(t, "INSERT INTO project_worker_settings (project_id, session_policy, concurrent_send, lease_ms, wait_ms, response_format) "+
+		"VALUES ('"+r.pid.String()+"', 'SINGLE_ACTIVE_PER_PROJECT', 'REJECT', 60000, 30000, 'KEY_VALUE')")
+	r.boot(t)
+	team := &sfTeam{t: t, dir: r.dir, script: r.script, failFirstTest: "A", tested: map[string]int{}, kv: true}
+	r.g.Responder = team.respond
+	ctx := context.Background()
+
+	guide, err := os.ReadFile(filepath.Join(r.dir, service.GuideFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"task: <KEY> — <task name>\nstatus: TODO | ACTIVE | COMPLETE | DONE", "every task `status: TODO`",
+		"check `criterion: [x]` each acceptance criterion", "`step: <planned step>`"} {
+		if !strings.Contains(string(guide), want) {
+			t.Fatalf("HERMES.md lacks %q:\n%s", want, guide)
+		}
+	}
+	if strings.Contains(string(guide), "### Acceptance criteria") {
+		t.Fatalf("HERMES.md still describes the Markdown layout:\n%s", guide)
+	}
+
+	res, err := r.eng().Run(ctx, r.execID, 200)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, p16Trace(res))
+	}
+	want := strings.Join([]string{
+		"create the output-format skill",
+		"plan phase 1",
+		"have the project manager perform acceptance tasks",
+		"implement task A", "test task A",
+		"implement task A", "test task A",
+		"have the project manager perform acceptance tasks",
+		"implement task B", "test task B",
+		"have the project manager perform acceptance tasks",
+	}, " | ")
+	if cmds := team.commandLines(); cmds != want {
+		t.Fatalf("commands\n got %s\nwant %s\nrecovery: %q\ntrace: %s", cmds, want, r.recoveryReason(t), p16Trace(res))
+	}
+	team.mu.Lock()
+	skills := append([]string(nil), team.skills...)
+	team.mu.Unlock()
+	if len(skills) != 1 || !strings.Contains(skills[0], service.TaskFileFormat(worker.FormatKeyValue)) {
+		t.Fatalf("skill command lacks the key:value task format: %q", skills)
+	}
+	if st := r.execStatus(t); st != string(execution.ExecutionCompleted) {
+		t.Fatalf("execution %s, recovery %q\ntrace: %s", st, r.recoveryReason(t), p16Trace(res))
+	}
+	if n := r.count(t, "SELECT count(*) FROM work_units w JOIN execution_plans p ON p.id = w.execution_plan_id WHERE w.status = 'DONE' AND p.phase_id = '"+r.phases[1].String()+"'"); n != 2 {
+		t.Fatalf("%d units DONE, want 2", n)
+	}
+	for _, rel := range []string{wbs.BacklogFile, wbs.ArchiveFile, wbs.ActiveTaskFile} {
+		b, err := os.ReadFile(filepath.Join(r.dir, rel))
+		if err != nil || !wbs.IsKeyValueTasks(string(b)) {
+			t.Fatalf("%s is not key:value: %q %v", rel, b, err)
+		}
 	}
 }

@@ -60,19 +60,10 @@ func TestP407MigrationApplied(t *testing.T) {
 	if err := h.DBScan(ctx, "SELECT coalesce(max(version),0) FROM schema_migrations", &version); err != nil {
 		t.Fatalf("schema_migrations: %v", err)
 	}
-	// Bumped 13 -> 14 by P4-31 (migration 00014, phase-order high-water
-	// mark), 14 -> 15 by P5-03 (migration 00015), 15 -> 16 by P5-06 (00016,
-	// instructions), 16 -> 17 by P5-07 (00017), 17 -> 18 by P5-08 (00018,
-	// role_instruction_assignments), 18 -> 19 by P5-10 (00019,
-	// role_allowed_states), 19 -> 20 by P5-11 (00020,
-	// role_state_files), 20 -> 22 by P6-05 (00021/00022,
-	// state_machines/workflow_states), 22 -> 23 by P6-06 (00023,
-	// state_transitions), 23 -> 24 by P6-07 (00024,
-	// state_role_assignments), ... 31 -> 32 by P6-27 (00032,
-	// transition_conditions) — accepted contract change, not a weakened
-	// test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	// Every migration on disk is applied: the schema version is the
+	// highest migration version (no hard-coded number to bump per phase).
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	var tableName string
 	if err := h.DBScan(ctx,

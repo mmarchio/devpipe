@@ -539,7 +539,7 @@ func (s *BootstrapService) stageFiles(ctx context.Context, sc *stageContext) (*p
 		}
 	}
 	// Statefile workflow: the team's role files and HERMES.md.
-	if err := s.writeTeamFiles(ctx, sc.content); err != nil {
+	if err := s.writeTeamFiles(ctx, pid, sc.content); err != nil {
 		msg := "team files could not be written to " + wbs.StatefilesDir
 		if resilience.IsDiskFull(err) {
 			msg += ": disk full (no space left on device); free space and resume the bootstrap"

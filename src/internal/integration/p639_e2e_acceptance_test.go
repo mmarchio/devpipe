@@ -2,7 +2,8 @@
 // project/phase/WBS/execution-plan/work-unit hierarchy is built, the four
 // roles (PLANNER, ENGINEER, TESTER, PROJECT_MANAGER) are configured in
 // project scope, and the P6-11 default development-workflow state machine
-// is instantiated for the project (CopyToProject). The WBS 6.49 flow is
+// is instantiated for the project (CopyComposedToProject; the statefile
+// workflow has since become the default). The WBS 6.49 flow is
 // then simulated WITHOUT any LLM calls: every step's transition is applied
 // through the REAL P6-21 transition-application service (the P6-31 preview
 // verifies the selection route first), the INCOMPLETE reports are routed by
@@ -156,9 +157,10 @@ func p639Fixture(t *testing.T, h *Harness) (project, machine, unitA, unitB strin
 	unitA = p633UnitBySeq(t, h, plan, 1)
 	unitB = p633UnitBySeq(t, h, plan, 2)
 
-	// Instantiate the P6-11 default state machine for the project.
+	// Instantiate the P6-11 composed-prompt state machine for the project
+	// (the WBS 6.49 flow runs on it, not on the statefile default).
 	var err error
-	machine, err = p611Svc(t, h).CopyToProject(ctx, project)
+	machine, err = p611Svc(t, h).CopyComposedToProject(ctx, project)
 	if err != nil {
 		t.Fatalf("copy default machine: %v", err)
 	}

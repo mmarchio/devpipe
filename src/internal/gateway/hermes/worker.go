@@ -691,3 +691,34 @@ func mustUUID(s string) uuid.UUID {
 }
 
 func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
+
+// sessionAdmin is the gateway client's optional Hermes session API.
+type sessionAdmin interface {
+	SessionStats(ctx context.Context, sessionID string) (HermesSessionStats, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+// SessionStats reports a Hermes session's counters (worker.SessionManager).
+func (w *GatewayWorker) SessionStats(ctx context.Context, sessionID string) (worker.SessionStats, error) {
+	a, ok := w.client.(sessionAdmin)
+	if !ok {
+		return worker.SessionStats{}, worker.NewError(worker.CodeInvalidRequest, worker.DeliveryNotSent, "session stats not supported by this gateway client", nil)
+	}
+	s, err := a.SessionStats(ctx, sessionID)
+	if err != nil {
+		return worker.SessionStats{}, err
+	}
+	return worker.SessionStats{Messages: s.MessageCount, ToolCalls: s.ToolCallCount, ModelCalls: s.APICallCount,
+		InputTokens: s.InputTokens, OutputTokens: s.OutputTokens, CacheReadTokens: s.CacheReadTokens}, nil
+}
+
+// DeleteSession deletes a Hermes session (worker.SessionManager).
+func (w *GatewayWorker) DeleteSession(ctx context.Context, sessionID string) error {
+	a, ok := w.client.(sessionAdmin)
+	if !ok {
+		return nil
+	}
+	return a.DeleteSession(ctx, sessionID)
+}
+
+var _ worker.SessionManager = (*GatewayWorker)(nil)

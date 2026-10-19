@@ -240,8 +240,8 @@ func TestP627MigrationApplied(t *testing.T) {
 	}
 	// 31 -> 32 by P6-27 (migration 00032, transition_conditions) —
 	// accepted contract change.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	var tableName string
 	if err := h.DBScan(p627Ctx,

@@ -12,7 +12,12 @@
   <dt>Model</dt><dd>{{if .Model}}{{.Model}}{{else}}—{{end}}</dd>
   <dt>Current CWD</dt><dd class="mono">{{if .CWD}}{{.CWD}}{{else}}—{{end}}</dd>
   <dt>Created</dt><dd>{{fmtTime .CreatedAt}}</dd><dt>Last activity</dt><dd>{{fmtTime .LastActivity}}</dd>
-</dl>{{template "meter" .Context}}{{end}}
+</dl>{{with .ProviderStats}}<h3>Provider session totals</h3>
+<p class="muted">Counted by {{$d.Panel.Provider}} for this session since it started (totals, not the current context size).</p>
+<dl class="facts">
+  <dt>Messages</dt><dd>{{.Messages}}</dd><dt>Tool calls</dt><dd>{{.ToolCalls}}</dd><dt>Model calls</dt><dd>{{.ModelCalls}}</dd>
+  <dt>Input tokens</dt><dd>{{.InputTokens}}</dd><dt>Cached input tokens</dt><dd>{{.CacheReadTokens}}</dd><dt>Output tokens</dt><dd>{{.OutputTokens}}</dd>
+</dl>{{end}}{{template "meter" .Context}}{{end}}
 <p class="muted">Transport credentials are never displayed.</p>
 </section>
 {{template "provider-test" (dict "Action" (print "/projects/" $pid "/worker/test") "CSRF" .Shell.CSRF "Provider" $d.Provider "Model" $d.Model "Test" $d.Test)}}

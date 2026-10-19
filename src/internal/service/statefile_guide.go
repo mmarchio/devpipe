@@ -6,10 +6,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"overseer/internal/execution"
 	"overseer/internal/role"
 	"overseer/internal/state"
 	"overseer/internal/wbs"
+	"overseer/internal/worker"
 )
 
 // Team files of the statefile workflow, written to
@@ -21,6 +24,11 @@ import (
 
 // GuideFile is the generated workflow guide.
 const GuideFile = wbs.StatefilesDir + "/HERMES.md"
+
+// GrammarFile is the generated GBNF grammar of the key:value reply format,
+// written only for key:value projects. The same grammar is sent with every
+// request of such a project.
+const GrammarFile = wbs.StatefilesDir + "/RESPONSE_FORMAT.gbnf"
 
 // RoleFile is the generated file of a role.
 func RoleFile(key string) string { return wbs.StatefilesDir + "/" + key + ".md" }
@@ -35,9 +43,10 @@ func statefileMachine(m state.StateMachineSnapshot) bool {
 	return false
 }
 
-// writeTeamFiles writes the role files and HERMES.md for a statefile
-// workflow execution (nothing for other workflows).
-func (s *BootstrapService) writeTeamFiles(ctx context.Context, content execution.ConfigurationContent) error {
+// writeTeamFiles writes the role files, HERMES.md and, for a key:value
+// project, the response grammar for a statefile workflow execution
+// (nothing for other workflows).
+func (s *BootstrapService) writeTeamFiles(ctx context.Context, projectID uuid.UUID, content execution.ConfigurationContent) error {
 	if !statefileMachine(content.StateMachine) {
 		return nil
 	}
@@ -60,8 +69,40 @@ func (s *BootstrapService) writeTeamFiles(ctx context.Context, content execution
 	if err != nil {
 		return err
 	}
-	if err := writeStatefile(cwd, GuideFile, RenderHermesGuide(content.StateMachine, keys, commands)); err != nil {
+	format, err := s.responseFormat(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if err := writeStatefile(cwd, GuideFile, RenderHermesGuide(content.StateMachine, keys, commands, format)); err != nil {
 		return fmt.Errorf("write %s: %w", GuideFile, err)
+	}
+	return writeGrammarFile(cwd, format)
+}
+
+// responseFormat is the project's worker response format (Markdown when
+// no worker settings are wired).
+func (s *BootstrapService) responseFormat(ctx context.Context, projectID uuid.UUID) (worker.ResponseFormat, error) {
+	if s.d.Worker == nil {
+		return worker.FormatMarkdown, nil
+	}
+	st, _, err := s.d.Worker.WorkerSettings(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	return st.ResponseFormat.OrDefault(), nil
+}
+
+// writeGrammarFile writes GrammarFile when the project's replies are
+// key:value and removes a stale one otherwise.
+func writeGrammarFile(cwd string, format worker.ResponseFormat) error {
+	if g := format.Grammar(); g != "" {
+		if err := writeStatefile(cwd, GrammarFile, g); err != nil {
+			return fmt.Errorf("write %s: %w", GrammarFile, err)
+		}
+		return nil
+	}
+	if err := removeStatefile(cwd, GrammarFile); err != nil {
+		return fmt.Errorf("remove %s: %w", GrammarFile, err)
 	}
 	return nil
 }
@@ -121,10 +162,41 @@ func renderRoleFile(r role.RoleSnapshot) string {
 	return b.String()
 }
 
+// taskSyntax spells task-file fields in a project's statefile format:
+// Markdown, or key:value for key:value projects.
+type taskSyntax struct{ kv bool }
+
+func syntaxFor(f worker.ResponseFormat) taskSyntax { return taskSyntax{kv: f == worker.FormatKeyValue} }
+
+// status is a task's status line with value v.
+func (s taskSyntax) status(v string) string {
+	if s.kv {
+		return "status: " + v
+	}
+	return "Status: " + v
+}
+
+// checked is a met acceptance criterion.
+func (s taskSyntax) checked() string {
+	if s.kv {
+		return "criterion: [x]"
+	}
+	return "[x]"
+}
+
+// notes says where a tester notes what fails.
+func (s taskSyntax) notes() string {
+	if s.kv {
+		return "in `instructions:` lines"
+	}
+	return "under `### Instructions`"
+}
+
 // RenderHermesGuide renders HERMES.md: the commands with their roles and
 // expected results, the transition rules the overseer applies, the reply
-// rule and the task file format.
-func RenderHermesGuide(m state.StateMachineSnapshot, roleKeys []string, commands map[string]string) string {
+// rule and the task file format, in the project's statefile format.
+func RenderHermesGuide(m state.StateMachineSnapshot, roleKeys []string, commands map[string]string, format worker.ResponseFormat) string {
+	sx := syntaxFor(format)
 	rolesOf := map[string]string{}
 	for _, st := range m.States {
 		rolesOf[st.Key] = strings.Join(st.Roles, ", then ")
@@ -151,16 +223,21 @@ func RenderHermesGuide(m state.StateMachineSnapshot, roleKeys []string, commands
 	b.WriteString("## Commands\n\n| Command | Role | Required result |\n|---|---|---|\n")
 	fmt.Fprintf(&b, "| %s | %s | Save the skill given in the command exactly as given (replacing an older copy) and follow it for every command of this project. |\n",
 		cmd("SKILL", "create the <project>-output-format skill"), rolesOf["SKILL"])
-	fmt.Fprintf(&b, "| %s | %s | ARCHITECT writes the phase plan to `%s` from the phase WBS in `%s/`; PLANNER breaks it into atomic, testable tasks in `%s` (format below, every task `Status: TODO`). |\n",
-		cmd("PLAN", "plan phase <N>"), rolesOf["PLAN"], wbs.PlanFile, wbs.WBSDir, wbs.BacklogFile)
-	fmt.Fprintf(&b, "| %s | %s | If `%s` holds a task with `Status: COMPLETE`: set it to `DONE`, append it to `%s` and mark it `DONE` in `%s`. Then load the next `TODO` task whose dependencies are all `DONE` into `%s` (`Status: ACTIVE`, also in the backlog), or leave `%s` with no task when every task is `DONE`. |\n",
-		cmd("ACCEPTANCE", "acceptance"), rolesOf["ACCEPTANCE"], wbs.ActiveTaskFile, wbs.ArchiveFile, wbs.BacklogFile, wbs.ActiveTaskFile, wbs.ActiveTaskFile)
+	fmt.Fprintf(&b, "| %s | %s | ARCHITECT writes the phase plan to `%s` from the phase WBS in `%s/`; PLANNER breaks it into atomic, testable tasks in `%s` (format below, every task `%s`). |\n",
+		cmd("PLAN", "plan phase <N>"), rolesOf["PLAN"], wbs.PlanFile, wbs.WBSDir, wbs.BacklogFile, sx.status("TODO"))
+	fmt.Fprintf(&b, "| %s | %s | If `%s` holds a task with `%s`: set it to `DONE`, append it to `%s` and mark it `DONE` in `%s`. Then load the next `TODO` task whose dependencies are all `DONE` into `%s` (`%s`, also in the backlog), or leave `%s` with no task when every task is `DONE`. |\n",
+		cmd("ACCEPTANCE", "acceptance"), rolesOf["ACCEPTANCE"], wbs.ActiveTaskFile, sx.status("COMPLETE"), wbs.ArchiveFile, wbs.BacklogFile, wbs.ActiveTaskFile, sx.status("ACTIVE"), wbs.ActiveTaskFile)
 	fmt.Fprintf(&b, "| %s | %s | Implement exactly the task in `%s` (tests first). Do not change its criteria or status. |\n",
 		cmd("IMPLEMENT", "implement task <KEY>"), rolesOf["IMPLEMENT"], wbs.ActiveTaskFile)
 	fmt.Fprintf(&b, "| %s | %s | Resume the interrupted implementation of the task in `%s`. |\n",
 		cmd("CONTINUE", "continue"), rolesOf["CONTINUE"], wbs.ActiveTaskFile)
-	fmt.Fprintf(&b, "| %s | %s | Test the task in `%s`; check `[x]` each acceptance criterion that is met. When all are met set `Status: COMPLETE`; otherwise leave the status and note what fails under `### Instructions`. |\n\n",
-		cmd("TEST", "test task <KEY>"), rolesOf["TEST"], wbs.ActiveTaskFile)
+	if commands["REPLAN"] != "" {
+		fmt.Fprintf(&b, "| %s | %s | The overseer's validation failed the task the same way repeatedly (the failure and the validation environment are in the command): "+
+			"rewrite the task in `%s` and `%s` so it can pass (objective, instructions, criteria, tests and validation may change; key, kind and dependencies stay; `%s`). |\n",
+			cmd("REPLAN", "replan task <KEY>"), rolesOf["REPLAN"], wbs.BacklogFile, wbs.ActiveTaskFile, sx.status("ACTIVE"))
+	}
+	fmt.Fprintf(&b, "| %s | %s | Test the task in `%s`; check `%s` each acceptance criterion that is met. When all are met set `%s`; otherwise leave the status and note what fails %s. |\n\n",
+		cmd("TEST", "test task <KEY>"), rolesOf["TEST"], wbs.ActiveTaskFile, sx.checked(), sx.status("COMPLETE"), sx.notes())
 
 	b.WriteString("## How the overseer decides\n\n")
 	b.WriteString("1. After PLAN: `" + wbs.PlanFile + "` must exist and `" + wbs.BacklogFile + "` must parse and pass the atomic-plan checks (unique keys, known kinds, declared dependencies without cycles, acceptance criteria, a test or validation per task, the dependency rules below). " +
@@ -168,47 +245,69 @@ func RenderHermesGuide(m state.StateMachineSnapshot, roleKeys []string, commands
 		"A PLAN command while `" + wbs.PlanRejectedFile + "` exists means: fix every listed problem and rewrite the backlog; the file is removed once a plan is accepted.\n")
 	b.WriteString("2. After acceptance: the task loaded into `" + wbs.ActiveTaskFile + "` becomes the active task → IMPLEMENT. No task and every backlog task DONE → phase validation, then the next phase.\n")
 	b.WriteString("3. After IMPLEMENT / CONTINUE: a reply → TEST. A run cut off before replying → CONTINUE (bounded).\n")
-	b.WriteString("4. After TEST: `Status: COMPLETE` with every criterion `[x]` → the overseer runs the task's validation commands itself; PASS → acceptance, FAIL → IMPLEMENT again. Anything else → IMPLEMENT again (bounded by the fix limit).\n")
+	b.WriteString("4. After TEST: `" + sx.status("COMPLETE") + "` with every criterion `" + sx.checked() + "` → the overseer runs the task's validation commands itself; PASS → acceptance, FAIL → IMPLEMENT again. Anything else → IMPLEMENT again (bounded by the fix limit).\n")
 	b.WriteString("5. Before marking a task DONE the overseer checks it is `DONE` in `" + wbs.ArchiveFile + "` and `" + wbs.BacklogFile + "` and gone from `" + wbs.ActiveTaskFile + "`, then commits a checkpoint.\n")
 	b.WriteString("6. A missing file, a file that does not parse, or a change that contradicts these rules: the command is sent again with the problem appended " +
 		"(fix the statefiles and redo the command), at most 3 times, then the project stops for operator recovery. Nothing is inferred from the reply.\n")
 	b.WriteString("7. Statuses in the statefiles are never taken on trust: a task that is `DONE` in `" + wbs.BacklogFile + "` and `" + wbs.ArchiveFile +
 		"` but not yet recorded by the overseer (for example after the project was recreated) is re-validated by the overseer and adopted only when its validation passes.\n\n")
-	b.WriteString("Never edit tasks other than the one the command concerns, never mark a task DONE outside acceptance, and never change a task's acceptance criteria after planning (same criteria, same order, from the backlog to the archive).\n\n")
+	b.WriteString("Never edit tasks other than the one the command concerns, never mark a task DONE outside acceptance, and never change a task's acceptance criteria after planning (except when the architect is asked to replan the task) (same criteria, same order, from the backlog to the archive).\n\n")
 
 	b.WriteString("## Return format\n\n")
 	b.WriteString(returnFormat + "\n\n")
 
 	b.WriteString("## Task file format\n\n")
-	b.WriteString(TaskFileFormat())
+	b.WriteString(TaskFileFormat(format))
 	return b.String()
 }
 
-// TaskFileFormat renders the task statefile layout and rules (the body of
-// HERMES.md's "Task file format" section); resent commands carry it too.
-func TaskFileFormat() string {
+// TaskFileFormat renders the task statefile layout and rules in the
+// project's statefile format (the body of HERMES.md's "Task file format"
+// section); resent commands carry it too.
+func TaskFileFormat(format worker.ResponseFormat) string {
 	var b strings.Builder
+	sx := syntaxFor(format)
 	fmt.Fprintf(&b, "`%s`, `%s` and `%s` use this layout; anything else is rejected with line numbers:\n\n", wbs.BacklogFile, wbs.ActiveTaskFile, wbs.ArchiveFile)
-	b.WriteString("```markdown\n# <title>\n\n<optional summary paragraph>\n\n## <KEY> — <task name>\nStatus: TODO | ACTIVE | COMPLETE | DONE\n" +
-		"Kind: ATOMIC | COMPOSITION | INTEGRATION | VALIDATION\nDepends on: none | <KEY>, <KEY>\nPaths: <relative path>, <relative path>\nSingle invocation: yes | no\n\n" +
-		"### Objective\n<what the task delivers>\n\n### Instructions\n<optional notes>\n\n### Acceptance criteria\n" +
-		"- [ ] [TEST] <criterion> (tests: TestName, TestOther)\n- [ ] [COMMAND] <criterion> `program arg arg`\n- [ ] [MANUAL] <criterion>\n\n" +
-		"### Required tests\n- <TestName>\n\n### Validation\n- `program arg arg`\n```\n\n")
-	b.WriteString("* `KEY`: letters, digits, `.`, `_`, `-`; one `## ` section per task, in execution order.\n")
+	if sx.kv {
+		b.WriteString("```text\ntitle: <title>\nsummary: <optional summary line>\n\ntask: <KEY> — <task name>\nstatus: TODO | ACTIVE | COMPLETE | DONE\n" +
+			"kind: ATOMIC | COMPOSITION | INTEGRATION | VALIDATION\ndepends_on: none | <KEY>, <KEY>\npaths: <relative path>, <relative path>\nsingle_invocation: yes | no\n" +
+			"objective: <what the task delivers>\ninstructions: <optional notes>\n" +
+			"criterion: [ ] [TEST] <criterion> (tests: TestName, TestOther)\ncriterion: [ ] [COMMAND] <criterion> `program arg arg`\ncriterion: [ ] [MANUAL] <criterion>\n" +
+			"required_test: <TestName>\nvalidation: `program arg arg`\n```\n\n")
+		b.WriteString("* Every line is `key: value` with a lower-case key from the layout above; blank lines separate tasks. No Markdown: no `#` headings, no `- ` lists.\n")
+		b.WriteString("* `KEY`: letters, digits, `.`, `_`, `-`; one `task:` line starts each task, in execution order, followed by that task's lines.\n")
+		b.WriteString("* Repeat `objective:`, `instructions:` and `summary:` for more lines, and `criterion:`, `required_test:` and `validation:` for more items.\n")
+	} else {
+		b.WriteString("```markdown\n# <title>\n\n<optional summary paragraph>\n\n## <KEY> — <task name>\nStatus: TODO | ACTIVE | COMPLETE | DONE\n" +
+			"Kind: ATOMIC | COMPOSITION | INTEGRATION | VALIDATION\nDepends on: none | <KEY>, <KEY>\nPaths: <relative path>, <relative path>\nSingle invocation: yes | no\n\n" +
+			"### Objective\n<what the task delivers>\n\n### Instructions\n<optional notes>\n\n### Acceptance criteria\n" +
+			"- [ ] [TEST] <criterion> (tests: TestName, TestOther)\n- [ ] [COMMAND] <criterion> `program arg arg`\n- [ ] [MANUAL] <criterion>\n\n" +
+			"### Required tests\n- <TestName>\n\n### Validation\n- `program arg arg`\n```\n\n")
+		b.WriteString("* `KEY`: letters, digits, `.`, `_`, `-`; one `## ` section per task, in execution order.\n")
+	}
 	b.WriteString("* `[x]` marks a met criterion. Composition, integration and validation tasks must declare dependencies.\n")
 	b.WriteString("* Dependency rules: an `ATOMIC` task never depends on a `COMPOSITION` or `INTEGRATION` task, " +
 		"and a `COMPOSITION` task never depends on an `INTEGRATION` task. Work that needs a composed or integrated result is itself `COMPOSITION` or `INTEGRATION`.\n")
+	example := "``- [ ] [COMMAND] Go toolchain is available `go version` ``"
+	if sx.kv {
+		example = "``criterion: [ ] [COMMAND] Go toolchain is available `go version` ``"
+	}
 	b.WriteString("* A `[COMMAND]` criterion must end with exactly one command in backticks, with nothing after the closing backtick: " +
-		"``- [ ] [COMMAND] Go toolchain is available `go version` ``. A criterion verified by tests is `[TEST]` and ends with `(tests: TestName)`; one with no command or test is `[MANUAL]`.\n")
+		example + ". A criterion verified by tests is `[TEST]` and ends with `(tests: TestName)`; one with no command or test is `[MANUAL]`.\n")
 	b.WriteString("* Commands are a program and its arguments, no shell syntax; paths are relative to the working directory.\n")
 	b.WriteString("* The overseer runs validation and `[COMMAND]` commands itself, in its own environment, not yours: a program you have " +
 		"(e.g. `docker`) may be missing there, and the plan is rejected when it is. Checks that need such tools are `[MANUAL]`.\n")
-	b.WriteString("* `" + wbs.ActiveTaskFile + "` holds exactly one task section, or none when no task is active.\n")
+	if sx.kv {
+		b.WriteString("* `" + wbs.ActiveTaskFile + "` holds exactly one task, or none (only a `title:` line) when no task is active.\n")
+		b.WriteString("* `" + wbs.PlanFile + "` is key:value too: a `title:` line, optional `summary:` lines and one `step: <planned step>` line per step.\n")
+	} else {
+		b.WriteString("* `" + wbs.ActiveTaskFile + "` holds exactly one task section, or none when no task is active.\n")
+	}
 	return b.String()
 }
 
 // returnFormat is the reply rule of every command.
-const returnFormat = "Reply to each command with a short plain-text summary of what was done and any blocker. The reply is stored for the operator but never parsed: " +
+const returnFormat = "Reply to each command with a short summary of what was done and any blocker, formatted as the project's output-format skill requires. The reply is stored for the operator but never parsed: " +
 	"every result the overseer acts on must be written to the statefiles in the format below."
 
 // OutputFormatSkillName is the Hermes skill holding a project's required
@@ -232,10 +331,29 @@ func OutputFormatSkillName(projectName string) string {
 	return slug + "-output-format"
 }
 
+// replyFormat is the reply formatting instruction for a response format
+// (the project's worker setting).
+func replyFormat(f worker.ResponseFormat) string {
+	switch f {
+	case worker.FormatXML:
+		return "Format every reply as XML: one `<reply>` root element holding a `<summary>` element and one `<blocker>` element per blocker " +
+			"(none when there is no blocker), escaping `<`, `>` and `&` in text. For example:\n\n" +
+			"```xml\n<reply>\n  <summary>Implemented the parser and its unit tests.</summary>\n</reply>\n```\n"
+	case worker.FormatKeyValue:
+		return "Format every reply as `key: value` lines, one per line with no other text: a `summary:` line, then one `blocker:` line per blocker " +
+			"(`blocker: none` when there is no blocker). For example:\n\n" +
+			"```text\nsummary: Implemented the parser and its unit tests.\nblocker: none\n```\n\n" +
+			"The exact grammar is the GBNF file `" + GrammarFile + "`; the overseer sends it with every command, so a reply that does not match it cannot be produced.\n"
+	}
+	return "Format every reply as Markdown: a short summary paragraph, then a `## Blockers` list (`- None` when there is no blocker). For example:\n\n" +
+		"```markdown\nImplemented the parser and its unit tests.\n\n## Blockers\n\n- None\n```\n"
+}
+
 // OutputFormatSkill renders the SKILL.md of the project's output-format
-// skill: the reply rule, the task file format and a pre-reply checklist —
-// the same rules HERMES.md documents and the overseer enforces.
-func OutputFormatSkill(projectName string) string {
+// skill: the reply rule in the project's response format, the task file
+// format and a pre-reply checklist — the same rules HERMES.md documents and
+// the overseer enforces.
+func OutputFormatSkill(projectName string, format worker.ResponseFormat) string {
 	var b strings.Builder
 	name := OutputFormatSkillName(projectName)
 	fmt.Fprintf(&b, "---\nname: %s\ndescription: Required response and statefile formatting for the %s project. "+
@@ -244,12 +362,19 @@ func OutputFormatSkill(projectName string) string {
 	fmt.Fprintf(&b, "# %s output format\n\n", projectName)
 	b.WriteString("The overseer reads the statefiles back after every command and rejects anything that does not match this format exactly; " +
 		"a rejected command is sent again with the problem. Follow it to the letter.\n\n")
-	b.WriteString("## Replies\n\n" + returnFormat + "\n\n")
-	b.WriteString("## Task files\n\n" + TaskFileFormat() + "\n")
+	b.WriteString("## Replies\n\n" + returnFormat + "\n\n" + replyFormat(format) + "\n")
+	b.WriteString("## Task files\n\n" + TaskFileFormat(format) + "\n")
 	b.WriteString("## Before you reply\n\n")
-	b.WriteString("- Each task file starts with one `# <title>` line; every task is a `## <KEY> — <task name>` section (never a `# ` heading).\n")
-	b.WriteString("- Every field line and `### ` section is inside a task section, in the order shown above.\n")
-	fmt.Fprintf(&b, "- `%s` holds exactly one task section, or none when no task is active.\n", wbs.ActiveTaskFile)
+	fmt.Fprintf(&b, "- The reply is formatted as %s, as shown under Replies.\n", format.Label())
+	if syntaxFor(format).kv {
+		b.WriteString("- Each task file is key:value lines only: a `title:` line, then for every task a `task: <KEY> — <task name>` line followed by its fields (no Markdown headings or lists).\n")
+		b.WriteString("- Every field line follows its task's `task:` line, in the order shown above.\n")
+		fmt.Fprintf(&b, "- `%s` holds exactly one task, or none when no task is active.\n", wbs.ActiveTaskFile)
+	} else {
+		b.WriteString("- Each task file starts with one `# <title>` line; every task is a `## <KEY> — <task name>` section (never a `# ` heading).\n")
+		b.WriteString("- Every field line and `### ` section is inside a task section, in the order shown above.\n")
+		fmt.Fprintf(&b, "- `%s` holds exactly one task section, or none when no task is active.\n", wbs.ActiveTaskFile)
+	}
 	b.WriteString("- Every `[COMMAND]` criterion ends with exactly one command in backticks; `[TEST]` criteria end with `(tests: …)`.\n")
 	b.WriteString("- Acceptance criteria are never changed after planning: same criteria, same order, from the backlog to the archive.\n")
 	fmt.Fprintf(&b, "- The rules in `%s` apply; when it and this skill differ, `%s` wins.\n", GuideFile, GuideFile)

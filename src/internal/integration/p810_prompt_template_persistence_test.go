@@ -59,8 +59,8 @@ func TestP810MigrationApplied(t *testing.T) {
 	}
 	// Bumped 40 -> 41 by P8-10 (migration 00041, prompt_templates) —
 	// accepted contract change, not a weakened test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	var n int
 	if err := h.DBScan(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'prompt_templates'", &n); err != nil {

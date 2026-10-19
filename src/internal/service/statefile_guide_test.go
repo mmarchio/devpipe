@@ -6,6 +6,7 @@ import (
 
 	"overseer/internal/role"
 	"overseer/internal/state"
+	"overseer/internal/worker"
 )
 
 func TestRenderRoleFile(t *testing.T) {
@@ -27,7 +28,7 @@ func TestRenderRoleFile(t *testing.T) {
 func TestRenderHermesGuide(t *testing.T) {
 	m := state.StateMachineSnapshot{States: []state.StateSnapshot{{Key: "PLAN", Roles: []string{"ARCHITECT", "PLANNER"}},
 		{Key: "TEST", Roles: []string{"TESTER"}}}}
-	got := RenderHermesGuide(m, []string{"ARCHITECT", "PLANNER", "TESTER"}, map[string]string{"PLAN": "plan phase <N>", "TEST": "verify <KEY>"})
+	got := RenderHermesGuide(m, []string{"ARCHITECT", "PLANNER", "TESTER"}, map[string]string{"PLAN": "plan phase <N>", "TEST": "verify <KEY>"}, worker.FormatMarkdown)
 	for _, want := range []string{"`statefiles/ARCHITECT.md`, `statefiles/PLANNER.md`, `statefiles/TESTER.md`",
 		"| `plan phase <N>` | ARCHITECT, then PLANNER |", "| `verify <KEY>` | TESTER |", "## How the overseer decides", "## Return format",
 		"never parsed", "Status: TODO | ACTIVE | COMPLETE | DONE", "- [ ] [MANUAL] <criterion>"} {

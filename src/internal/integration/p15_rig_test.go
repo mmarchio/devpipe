@@ -150,6 +150,32 @@ func p15BuildWorkflow(t *testing.T, h *Harness, g *hermestest.Gateway, srv *prov
 		r.roles[rr.Key] = rr.ID
 	}
 
+	r.installWorkflow(t, statefile)
+
+	// Phases + WBS versions.
+	for _, ph := range phases {
+		id := seedPhaseStatus(t, h, r.pid, ph.order, ph.name, ph.status)
+		r.phases[ph.order] = id
+		for v := 1; v <= ph.wbs; v++ {
+			r.appendWBS(t, ph.order)
+		}
+	}
+	r.exec(t, "UPDATE projects SET status = 'READY' WHERE id = '"+r.pid.String()+"'")
+	return r
+}
+
+// installWorkflow copies the composed-prompt workflow (or, statefile, the
+// default statefile workflow) into the rig's project, assigns its roles
+// (r.roles must be populated) and pins the response protocol on every
+// prompted state.
+func (r *p15Rig) installWorkflow(t *testing.T, statefile bool) {
+	t.Helper()
+	ctx := context.Background()
+	h := r.h
+	raw := h.App.DB().Raw()
+	tmplSvc := service.NewStateTemplateService(dbrepo.NewStateMachineRepository(raw), dbrepo.NewWorkflowStateRepository(raw),
+		dbrepo.NewStateTransitionRepository(raw), dbrepo.NewProjectRepository(raw)).WithTxPool(raw)
+	r.states = map[string]uuid.UUID{}
 	// Default workflow copied to the project + role assignments.
 	copyWorkflow := tmplSvc.CopyComposedToProject
 	if statefile {
@@ -203,17 +229,6 @@ func p15BuildWorkflow(t *testing.T, h *Harness, g *hermestest.Gateway, srv *prov
 			t.Fatalf("protocol reference %s: %v", s.Key, err)
 		}
 	}
-
-	// Phases + WBS versions.
-	for _, ph := range phases {
-		id := seedPhaseStatus(t, h, r.pid, ph.order, ph.name, ph.status)
-		r.phases[ph.order] = id
-		for v := 1; v <= ph.wbs; v++ {
-			r.appendWBS(t, ph.order)
-		}
-	}
-	r.exec(t, "UPDATE projects SET status = 'READY' WHERE id = '"+r.pid.String()+"'")
-	return r
 }
 
 func (r *p15Rig) exec(t *testing.T, sql string) {

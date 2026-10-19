@@ -33,6 +33,10 @@ import (
 // seeded as editable data without a current default-state reference (the
 // required-state set is the seven mappings above).
 
+// p812Seeded is the number of global templates SeedDefaults creates (one
+// v1 version each): every entry of service.defaultTemplateSpecs.
+const p812Seeded = 25
+
 // p812Service wires the seeding service over the harness pool.
 func p812Service(t *testing.T, h *Harness) *service.PromptTemplateService {
 	t.Helper()
@@ -80,10 +84,11 @@ func TestP812DefaultsSeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListGlobal: %v", err)
 	}
-	// Seeded set = the 9 canonical keys + the two WBS 6.7 state-reference
-	// aliases PLAN_VALIDATE/PHASE_VALIDATE (T8.2.3 resolves every reference).
-	if len(list) != 18 {
-		t.Fatalf("global templates = %d, want 18", len(list))
+	// Seeded set = the 9 canonical keys, the two WBS 6.7 state-reference
+	// aliases PLAN_VALIDATE/PHASE_VALIDATE (T8.2.3 resolves every reference)
+	// and the remaining workflow templates (service.defaultTemplateSpecs).
+	if len(list) != p812Seeded {
+		t.Fatalf("global templates = %d, want %d", len(list), p812Seeded)
 	}
 	seen := map[string]bool{}
 	for _, rec := range list {
@@ -142,8 +147,8 @@ func TestP812SeedIdempotent(t *testing.T) {
 	if err := h.DBScan(ctx, `SELECT count(*) FROM prompt_template_versions`, &verCount); err != nil {
 		t.Fatal(err)
 	}
-	if tplCount != 18 || verCount != 18 {
-		t.Fatalf("after first seed: templates = %d, versions = %d, want 18/16", tplCount, verCount)
+	if tplCount != p812Seeded || verCount != p812Seeded {
+		t.Fatalf("after first seed: templates = %d, versions = %d, want %d/%d", tplCount, verCount, p812Seeded, p812Seeded)
 	}
 
 	if err := svc.SeedDefaults(ctx); err != nil {
@@ -158,8 +163,8 @@ func TestP812SeedIdempotent(t *testing.T) {
 	if err := h.DBScan(ctx, `SELECT count(*) FROM prompt_template_versions`, &verCount); err != nil {
 		t.Fatal(err)
 	}
-	if tplCount != 18 || verCount != 18 {
-		t.Fatalf("after second seed: templates = %d, versions = %d, want 18/16 (idempotency violated)", tplCount, verCount)
+	if tplCount != p812Seeded || verCount != p812Seeded {
+		t.Fatalf("after second seed: templates = %d, versions = %d, want %d/%d (idempotency violated)", tplCount, verCount, p812Seeded, p812Seeded)
 	}
 	// Version rows must remain exactly the v1 rows with unchanged hashes.
 	var hashes string
@@ -302,8 +307,8 @@ func TestP812ConcurrentSeed(t *testing.T) {
 	if err := h.DBScan(ctx, `SELECT count(*) FROM prompt_template_versions`, &verCount); err != nil {
 		t.Fatal(err)
 	}
-	if tplCount != 18 || verCount != 18 {
-		t.Fatalf("after concurrent seeds: templates = %d, versions = %d, want 18/16", tplCount, verCount)
+	if tplCount != p812Seeded || verCount != p812Seeded {
+		t.Fatalf("after concurrent seeds: templates = %d, versions = %d, want %d/%d", tplCount, verCount, p812Seeded, p812Seeded)
 	}
 }
 

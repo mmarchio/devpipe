@@ -322,8 +322,8 @@ func (c *HTTPClient) send(ctx context.Context, sessionID string, req GatewayRequ
 		content = WithWorkingDirectory(*cwd, content)
 	}
 	user := ChatMessage{Role: "user", Content: content}
-	body := ChatRequest{Model: req.Model, Messages: append(msgs, user), Stream: false}
-	hdr := map[string]string{HeaderRequestID: req.RequestID, HeaderDispatchKey: key, HeaderSessionID: sessionID}
+	body := ChatRequest{Model: req.Model, Messages: append(msgs, user), Stream: false, Grammar: req.Grammar}
+	hdr := map[string]string{HeaderRequestID: req.RequestID, HeaderDispatchKey: key, HeaderSessionID: sessionID, HeaderHermesSessionID: sessionID}
 	if len(req.Metadata) > 0 {
 		md, _ := json.Marshal(req.Metadata)
 		hdr[HeaderMetadata] = string(md)
@@ -416,3 +416,38 @@ func (r *EventReader) Next() (string, GatewayStreamEvent, []byte, error) {
 
 // Close closes the stream body.
 func (r *EventReader) Close() error { return r.body.Close() }
+
+// SessionStats reads a Hermes session's counters; a session Hermes does
+// not know is a session-not-found error.
+func (c *HTTPClient) SessionStats(ctx context.Context, sessionID string) (HermesSessionStats, error) {
+	r, _, err := c.do(ctx, http.MethodGet, PathSessions+url.PathEscape(sessionID), nil, nil)
+	if err != nil {
+		return HermesSessionStats{}, err
+	}
+	if r.status == http.StatusNotFound {
+		return HermesSessionStats{}, sessionNotFound(sessionID)
+	}
+	var out struct {
+		Session HermesSessionStats `json:"session"`
+	}
+	if err := c.decode(r, &out); err != nil {
+		return HermesSessionStats{}, err
+	}
+	return out.Session, nil
+}
+
+// DeleteSession deletes a Hermes session the overseer has finished with;
+// one Hermes no longer knows is already gone (nil).
+func (c *HTTPClient) DeleteSession(ctx context.Context, sessionID string) error {
+	r, _, err := c.do(ctx, http.MethodDelete, PathSessions+url.PathEscape(sessionID), nil, nil)
+	if err != nil {
+		return err
+	}
+	if r.status == http.StatusNotFound {
+		return nil
+	}
+	var out struct {
+		Deleted bool `json:"deleted"`
+	}
+	return c.decode(r, &out)
+}

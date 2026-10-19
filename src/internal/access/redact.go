@@ -1,7 +1,9 @@
 package access
 
 import (
+	"slices"
 	"strings"
+	"sync"
 
 	"overseer/internal/worker"
 )
@@ -32,6 +34,7 @@ func IsSecretKey(k string) bool {
 // (WBS 17.122, 17.57, 17.105): values under secret-like keys and every
 // occurrence of a known secret value (configured provider credentials).
 type Redactor struct {
+	mu      sync.RWMutex
 	secrets []string
 }
 
@@ -39,20 +42,33 @@ type Redactor struct {
 // very short values are ignored to avoid redacting ordinary text).
 func NewRedactor(secrets ...string) *Redactor {
 	r := &Redactor{}
+	r.Add(secrets...)
+	return r
+}
+
+// Add remembers more secret values (a provider configured at runtime).
+func (r *Redactor) Add(secrets ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, s := range secrets {
-		if len(s) >= 6 {
+		if len(s) >= 6 && !slices.Contains(r.secrets, s) {
 			r.secrets = append(r.secrets, s)
 		}
 	}
-	return r
 }
 
 // String redacts known secret values in s (reuses worker.Redact).
 func (r *Redactor) String(s string) string {
-	if r == nil || len(r.secrets) == 0 {
+	if r == nil {
 		return s
 	}
-	return worker.Redact(s, r.secrets...)
+	r.mu.RLock()
+	secrets := r.secrets
+	r.mu.RUnlock()
+	if len(secrets) == 0 {
+		return s
+	}
+	return worker.Redact(s, secrets...)
 }
 
 // Value redacts a decoded JSON value recursively and returns a copy.

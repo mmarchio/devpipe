@@ -129,7 +129,9 @@ func (s *WorkerService) admit(ctx context.Context, req DispatchRequest, id uuid.
 		}
 		return nil, translate(err)
 	}
+	// A key:value project constrains every reply with its GBNF grammar.
 	wreq := worker.WorkerRequest{RequestID: d.RequestID, ProjectID: d.ProjectID, PhaseID: d.PhaseID, WorkUnitID: d.WorkUnitID, Prompt: *wp,
+		Grammar:  st.ResponseFormat.Grammar(),
 		Metadata: worker.WorkerRequestMetadata{RuntimeStateID: d.RuntimeStateID, StateKey: d.StateKey, RoleKey: d.RoleKey, PromptHash: wp.Hash, Attempt: d.Attempt}}
 	return &admitted{d: d, sess: sess, lease: st.Lease, prompt: wreq}, nil
 }
@@ -348,6 +350,9 @@ func (s *WorkerService) execute(ctx context.Context, a *admitted) (*DispatchResu
 // streaming (tool activity captured, WBS 12.45-12.47), otherwise Send.
 // The assembled streamed response is what gets persisted (WBS 12.45.3).
 func (s *WorkerService) send(ctx context.Context, pw *projectWorker, req worker.WorkerRequest) (worker.WorkerResponse, []worker.ToolActivity, error) {
+	// A worker retired by a provider change stays open until this
+	// request ends.
+	defer pw.acquire()()
 	sw, ok := pw.w.(worker.StreamingWorker)
 	if caps, err := pw.w.Capabilities(ctx); !ok || err != nil || !caps.Streaming {
 		resp, err := pw.w.Send(ctx, req)

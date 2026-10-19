@@ -17,13 +17,31 @@ import (
 // named in the app configuration at call time and are never persisted.
 type Factory struct {
 	providers map[string]config.CompressionProviderConfig
-	getenv    func(string) string
-	client    *http.Client
+	// source, when set, supplies the current providers on every call
+	// (providers edited at runtime); providers is then ignored.
+	source func() map[string]config.CompressionProviderConfig
+	getenv func(string) string
+	client *http.Client
 	// resolve resolves secret references ("file:/path" / env name) per
 	// client build, so a rotated key applies to the next call (WBS 18.78).
 	resolve func(ref string) (string, bool)
 	// dialControl vets resolved addresses (endpoint policy, WBS 18.88).
 	dialControl func(network, address string, c syscall.RawConn) error
+}
+
+// WithSource reads the providers from source on every call, so providers
+// added or changed at runtime apply to the next client.
+func (f *Factory) WithSource(source func() map[string]config.CompressionProviderConfig) *Factory {
+	f.source = source
+	return f
+}
+
+// current returns the providers in effect.
+func (f *Factory) current() map[string]config.CompressionProviderConfig {
+	if f.source != nil {
+		return f.source()
+	}
+	return f.providers
 }
 
 // WithResolver installs the secret-reference resolver.
@@ -57,8 +75,9 @@ func (f *Factory) WithHTTPClient(c *http.Client) *Factory {
 
 // Names lists the configured provider names (sorted).
 func (f *Factory) Names() []string {
-	out := make([]string, 0, len(f.providers))
-	for n := range f.providers {
+	providers := f.current()
+	out := make([]string, 0, len(providers))
+	for n := range providers {
 		out = append(out, n)
 	}
 	sort.Strings(out)
@@ -68,7 +87,7 @@ func (f *Factory) Names() []string {
 // Client builds the adapter for a provider name; an unknown name or a
 // required-but-missing credential is a configuration error.
 func (f *Factory) Client(name string) (*OpenAICompatible, error) {
-	p, ok := f.providers[name]
+	p, ok := f.current()[name]
 	if !ok || name == "" {
 		return nil, compression.NewError(compression.ErrorConfiguration, "unknown compression provider "+quote(name))
 	}

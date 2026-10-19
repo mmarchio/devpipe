@@ -10,6 +10,7 @@ import (
 	"overseer/internal/wbs"
 	"overseer/internal/web"
 	"overseer/internal/web/viewmodels"
+	"overseer/internal/worker"
 )
 
 func splitList(s string) []string {
@@ -896,11 +897,13 @@ type workerConfigData struct {
 	Workers       []readmodel.ProviderInfo
 	Policies      []string
 	SendPolicies  []string
+	Formats       []worker.ResponseFormat
 	ConfigVersion int
 }
 
 func (c *Console) workerConfigData(r *http.Request) workerConfigData {
-	d := workerConfigData{Policies: []string{"SINGLE_ACTIVE_PER_PROJECT", "MULTIPLE_ACTIVE"}, SendPolicies: []string{"REJECT", "WAIT"}}
+	d := workerConfigData{Policies: []string{"SINGLE_ACTIVE_PER_PROJECT", "MULTIPLE_ACTIVE"}, SendPolicies: []string{"REJECT", "WAIT"},
+		Formats: worker.ResponseFormats}
 	c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/settings", &d.Settings)
 	d.ConfigVersion = configVersion(c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/settings/worker", &d.Worker))
 	d.Workers, _ = c.providerLists(r)
@@ -946,7 +949,7 @@ func (c *Console) configWorkerSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := map[string]any{"session_policy": r.PostFormValue("session_policy"), "concurrent_send": r.PostFormValue("concurrent_send"),
-		"version": atoi(r.PostFormValue("config_version"))}
+		"response_format": r.PostFormValue("response_format"), "version": atoi(r.PostFormValue("config_version"))}
 	if resp := c.d.API.Do(r, http.MethodPut, "/api/v1/projects/"+pid(r)+"/settings/worker", body, ""); !resp.OK() {
 		c.renderConfigError(w, r, "config_worker", c.workerConfigData(r), resp)
 		return

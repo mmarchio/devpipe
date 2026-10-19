@@ -94,6 +94,43 @@ type projectWorker struct {
 	mu      sync.Mutex
 	lastOK  *time.Time
 	lastErr *worker.WorkerErrorSummary
+	// inFlight counts requests being sent; a retired worker (its
+	// provider changed) is closed when it is idle.
+	inFlight int
+	retired  bool
+}
+
+// acquire marks a request in flight; the returned func ends it.
+func (p *projectWorker) acquire() func() {
+	p.mu.Lock()
+	p.inFlight++
+	p.mu.Unlock()
+	return func() {
+		p.mu.Lock()
+		p.inFlight--
+		closeNow := p.retired && p.inFlight == 0
+		p.mu.Unlock()
+		if closeNow {
+			p.close()
+		}
+	}
+}
+
+// retire closes the worker now when idle, else after its last request.
+func (p *projectWorker) retire() {
+	p.mu.Lock()
+	p.retired = true
+	closeNow := p.inFlight == 0
+	p.mu.Unlock()
+	if closeNow {
+		p.close()
+	}
+}
+
+func (p *projectWorker) close() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = p.w.Close(ctx)
 }
 
 func (p *projectWorker) recordOK(at time.Time) {
@@ -211,6 +248,21 @@ func (s *WorkerService) workerConfig(ctx context.Context, projectID uuid.UUID) (
 // worker returns the project's worker, creating and connecting it on first
 // use. A worker whose connection failed is kept (its state reports FAILED)
 // so the failure is visible and Reconnect can restore it.
+// RetireWorkers drops every cached worker after a provider configuration
+// change: the next request builds a worker from the new configuration.
+// An idle worker is closed now; one with a request in flight is closed
+// when that request ends. It returns the number of workers retired.
+func (s *WorkerService) RetireWorkers() int {
+	s.mu.Lock()
+	old := s.workers
+	s.workers = map[uuid.UUID]*projectWorker{}
+	s.mu.Unlock()
+	for _, pw := range old {
+		pw.retire()
+	}
+	return len(old)
+}
+
 func (s *WorkerService) worker(ctx context.Context, projectID uuid.UUID) (*projectWorker, error) {
 	s.mu.Lock()
 	if s.closing {

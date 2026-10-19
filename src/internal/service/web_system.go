@@ -39,13 +39,14 @@ type SystemStatusConfig struct {
 // checks (WBS 17.107–17.109, P17-62). A failing provider is reported as
 // UNHEALTHY without marking the process dead (/health stays liveness).
 type SystemStatusService struct {
-	web    persistence.WebReadRepository
-	db     func(ctx context.Context) error
-	checks []ProviderCheck
-	cfg    SystemStatusConfig
-	now    func() time.Time
-	audit  *AuditVerificationService
-	gate   *WorkGate
+	web         persistence.WebReadRepository
+	db          func(ctx context.Context) error
+	checks      []ProviderCheck
+	checkSource func() []ProviderCheck
+	cfg         SystemStatusConfig
+	now         func() time.Time
+	audit       *AuditVerificationService
+	gate        *WorkGate
 }
 
 // WithAudit reports the audit verification and the new-work gate.
@@ -57,6 +58,13 @@ func (s *SystemStatusService) WithAudit(v *AuditVerificationService, gate *WorkG
 // NewSystemStatusService builds the service.
 func NewSystemStatusService(web persistence.WebReadRepository, db func(ctx context.Context) error, checks []ProviderCheck, cfg SystemStatusConfig) *SystemStatusService {
 	return &SystemStatusService{web: web, db: db, checks: checks, cfg: cfg, now: time.Now}
+}
+
+// WithCheckSource builds the provider checks on every status read, so
+// providers edited at runtime are probed (it replaces the fixed checks).
+func (s *SystemStatusService) WithCheckSource(source func() []ProviderCheck) *SystemStatusService {
+	s.checkSource = source
+	return s
 }
 
 // Status returns the current system status.
@@ -72,7 +80,11 @@ func (s *SystemStatusService) Status(ctx context.Context) (*readmodel.SystemStat
 		cancel()
 	}
 	st.Providers = append(st.Providers, readmodel.ProviderHealth{Kind: "database", Name: "PostgreSQL", Status: st.Database})
-	for _, c := range s.checks {
+	checks := s.checks
+	if s.checkSource != nil {
+		checks = s.checkSource()
+	}
+	for _, c := range checks {
 		ph := readmodel.ProviderHealth{Kind: c.Kind, Name: c.Name, Status: "UNKNOWN"}
 		if c.Check != nil {
 			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)

@@ -34,7 +34,7 @@ func TestT1874SecretSentinelsNeverLeak(t *testing.T) {
 	if err := os.WriteFile(tokenFile, []byte(gatewayToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r := p17NewRigWith(t, p16Options{config: func(c *config.Config) {
+	r := p17NewRigWith(t, p16Options{noBootstrap: true, config: func(c *config.Config) {
 		p := c.WorkerProviders["hermes"]
 		p.AuthSecretEnv, p.AuthSecretFile = "", tokenFile
 		c.WorkerProviders["hermes"] = p
@@ -43,7 +43,10 @@ func TestT1874SecretSentinelsNeverLeak(t *testing.T) {
 		c.CompressionProviders["fake"] = cp
 		c.Web.CSRFKeyEnv = "P18_CSRF_KEY"
 	}})
+	// The gateway must accept the file token before bootstrap, which
+	// checks the worker session.
 	r.g.SetToken(gatewayToken)
+	r.boot(t)
 	ctx := context.Background()
 
 	// Compression is forced and the provider rejects the key, echoing it.

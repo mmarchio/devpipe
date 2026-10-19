@@ -39,13 +39,13 @@ var Version = "0.18.0"
 // audit metadata and events can be scrubbed of them (WBS 17.122).
 func (a *App) secretValues() []string {
 	var out []string
-	for _, p := range a.cfg.WorkerProviders {
+	for _, p := range a.providers.Workers() {
 		if ref := workerSecretRef(p); ref != "" {
 			v, _ := a.secrets.Resolve(ref)
 			out = append(out, v)
 		}
 	}
-	for _, p := range a.cfg.CompressionProviders {
+	for _, p := range a.providers.Compressors() {
 		if ref := compressionSecretRef(p); ref != "" {
 			v, _ := a.secrets.Resolve(ref)
 			out = append(out, v)
@@ -105,21 +105,22 @@ func (a *App) providerChecks() []service.ProviderCheck {
 		}
 	}
 	var out []service.ProviderCheck
-	names := make([]string, 0, len(a.cfg.WorkerProviders))
-	for n := range a.cfg.WorkerProviders {
+	workers, compressors := a.providers.Workers(), a.providers.Compressors()
+	names := make([]string, 0, len(workers))
+	for n := range workers {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		out = append(out, service.ProviderCheck{Kind: "worker", Name: n, Check: dial(a.cfg.WorkerProviders[n].Endpoint)})
+		out = append(out, service.ProviderCheck{Kind: "worker", Name: n, Check: dial(workers[n].Endpoint)})
 	}
 	names = names[:0]
-	for n := range a.cfg.CompressionProviders {
+	for n := range compressors {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		out = append(out, service.ProviderCheck{Kind: "compression", Name: n, Check: dial(a.cfg.CompressionProviders[n].BaseURL)})
+		out = append(out, service.ProviderCheck{Kind: "compression", Name: n, Check: dial(compressors[n].BaseURL)})
 	}
 	return out
 }
@@ -139,16 +140,16 @@ func (a *App) startConsole(router *web.Router, setSvc *service.SettingsService, 
 	a.feed = service.NewLiveEventFeed(webRepo, service.LiveFeedConfig{Interval: a.cfg.Web.FeedInterval, Buffer: a.cfg.Web.FeedBuffer})
 	planning := service.NewPlanningSettingsService(setSvc, a.engine)
 	workerNames := func() []string {
-		out := make([]string, 0, len(a.cfg.WorkerProviders))
-		for n := range a.cfg.WorkerProviders {
+		out := make([]string, 0, len(a.providers.Workers()))
+		for n := range a.providers.Workers() {
 			out = append(out, n)
 		}
 		sort.Strings(out)
 		return out
 	}
 	compNames := func() []string {
-		out := make([]string, 0, len(a.cfg.CompressionProviders))
-		for n := range a.cfg.CompressionProviders {
+		out := make([]string, 0, len(a.providers.Compressors()))
+		for n := range a.providers.Compressors() {
 			out = append(out, n)
 		}
 		sort.Strings(out)
@@ -190,8 +191,8 @@ func (a *App) startConsole(router *web.Router, setSvc *service.SettingsService, 
 				return context.DeadlineExceeded
 			}
 			return err
-		}, a.providerChecks(), service.SystemStatusConfig{Version: Version, Profile: a.cfg.EffectiveProfile(), SchemaVersion: a.schemaVersion, InstanceID: a.instanceID, StartedAt: a.startedAt,
-			SchedulerEnabled: !a.cfg.Engine.SchedulerDisabled, SchedulerInterval: a.cfg.Engine.Interval, ValidationCapacity: workers}).WithAudit(a.auditVerifier(), a.workGate()),
+		}, nil, service.SystemStatusConfig{Version: Version, Profile: a.cfg.EffectiveProfile(), SchemaVersion: a.schemaVersion, InstanceID: a.instanceID, StartedAt: a.startedAt,
+			SchedulerEnabled: !a.cfg.Engine.SchedulerDisabled, SchedulerInterval: a.cfg.Engine.Interval, ValidationCapacity: workers}).WithAudit(a.auditVerifier(), a.workGate()).WithCheckSource(a.providerChecks),
 		AuditVerify: a.auditVerifier(),
 		Restore:     a.restoreGate(),
 		Health:      a.systemHealth(),
@@ -225,6 +226,9 @@ func (a *App) startConsole(router *web.Router, setSvc *service.SettingsService, 
 	if err := web.RegisterConsoleRoutes(router, a.console); err != nil {
 		return fmt.Errorf("app: register console routes: %w", err)
 	}
+	if err := web.RegisterSystemConfigRoutes(router, a.systemConfig()); err != nil {
+		return fmt.Errorf("app: register system configuration routes: %w", err)
+	}
 	// Server-rendered console pages (WBS 17.2): they consume the API above
 	// in-process.
 	pages, err := handlers.New(handlers.Deps{API: router.Internal(), CSRF: router.CSRFToken, Version: Version,
@@ -246,7 +250,7 @@ func (a *App) providerModels(ctx context.Context, kind, name string) ([]string, 
 	var tlsCfg *tls.Config
 	switch kind {
 	case "worker":
-		p, ok := a.cfg.WorkerProviders[name]
+		p, ok := a.providers.Worker(name)
 		if !ok {
 			return nil, false, nil
 		}
@@ -262,7 +266,7 @@ func (a *App) providerModels(ctx context.Context, kind, name string) ([]string, 
 		}
 		url, ref = strings.TrimRight(p.Endpoint, "/")+"/v1/models", workerSecretRef(p)
 	case "compression":
-		p, ok := a.cfg.CompressionProviders[name]
+		p, ok := a.providers.Compressor(name)
 		if !ok {
 			return nil, false, nil
 		}
@@ -299,13 +303,13 @@ func (a *App) providerTest(ctx context.Context, kind, name, model string) (readm
 	start := time.Now()
 	switch kind {
 	case "worker":
-		p, ok := a.cfg.WorkerProviders[name]
+		p, ok := a.providers.Worker(name)
 		if !ok {
 			return res, false
 		}
 		reply, err = a.testWorker(ctx, p, model)
 	case "compression":
-		if _, ok := a.cfg.CompressionProviders[name]; !ok {
+		if _, ok := a.providers.Compressor(name); !ok {
 			return res, false
 		}
 		reply, err = a.testCompressor(ctx, name, model)
@@ -374,7 +378,7 @@ func (a *App) testWorker(ctx context.Context, p config.WorkerProviderConfig, mod
 }
 
 func (a *App) testCompressor(ctx context.Context, name, model string) (string, error) {
-	client, err := compressionprovider.NewFactory(a.cfg.CompressionProviders).WithResolver(a.secrets.Resolve).
+	client, err := compressionprovider.NewFactory(nil).WithSource(a.providers.Compressors).WithResolver(a.secrets.Resolve).
 		WithDialControl(endpointDialControl(a.cfg)).Client(name)
 	if err != nil {
 		return "", err
@@ -411,26 +415,76 @@ func (a *App) providerInfo() []readmodel.ProviderInfo {
 		return u.Host
 	}
 	var out []readmodel.ProviderInfo
-	names := make([]string, 0, len(a.cfg.WorkerProviders))
-	for n := range a.cfg.WorkerProviders {
+	workers, compressors := a.providers.Workers(), a.providers.Compressors()
+	names := make([]string, 0, len(workers))
+	for n := range workers {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		p := a.cfg.WorkerProviders[n]
+		p := workers[n]
 		out = append(out, readmodel.ProviderInfo{Kind: "worker", Name: n, ProviderKind: p.Kind, EndpointHost: host(p.Endpoint),
 			SecretRef: p.AuthSecretEnv, SecretConfigured: p.AuthSecretEnv != "" && os.Getenv(p.AuthSecretEnv) != "",
 			Capabilities: []string{"sessions", "cwd", "usage"}})
 	}
 	names = names[:0]
-	for n := range a.cfg.CompressionProviders {
+	for n := range compressors {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		p := a.cfg.CompressionProviders[n]
+		p := compressors[n]
 		out = append(out, readmodel.ProviderInfo{Kind: "compression", Name: n, ProviderKind: p.Kind, EndpointHost: host(p.BaseURL),
 			SecretRef: p.APIKeyEnv, SecretConfigured: p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "", Capabilities: []string{}})
 	}
 	return out
+}
+
+// systemConfig builds the console's System / Models configuration
+// service over the configuration file. Provider changes apply at once:
+// the live store is replaced, cached workers are retired so the next
+// request uses the new settings, and new secrets are redacted.
+func (a *App) systemConfig() *service.SystemConfigService {
+	pool := a.db.Raw()
+	return service.NewSystemConfigService(service.SystemConfigDeps{
+		Path:      a.opts.ConfigPath,
+		Running:   a.cfg.Database,
+		Providers: a.providers,
+		Apply: func(cfg config.Config) {
+			a.providers.Replace(cfg)
+			if a.workerSvc != nil {
+				n := a.workerSvc.RetireWorkers()
+				a.lg.WithComponent("config").Logger.Info("provider configuration applied", "workers_retired", n,
+					"worker_providers", len(cfg.WorkerProviders), "compression_providers", len(cfg.CompressionProviders))
+			}
+			if a.redactor != nil {
+				a.redactor.Add(a.secretValues()...)
+			}
+		},
+		InUse: func(ctx context.Context, kind, name string) ([]string, error) {
+			col := map[string]string{service.ProviderKindWorker: "worker_provider", service.ProviderKindCompression: "compression_provider"}[kind]
+			if col == "" {
+				return nil, nil
+			}
+			rows, err := pool.Query(ctx, `SELECT p.name FROM projects p JOIN project_settings s ON s.project_id = p.id
+				WHERE s.`+col+` = $1 ORDER BY p.name`, name)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			var out []string
+			for rows.Next() {
+				var n string
+				if err := rows.Scan(&n); err != nil {
+					return nil, err
+				}
+				out = append(out, n)
+			}
+			return out, rows.Err()
+		},
+		SecretSet: func(ref string) bool {
+			v, ok := a.secrets.Resolve(ref)
+			return ok && v != ""
+		},
+	})
 }

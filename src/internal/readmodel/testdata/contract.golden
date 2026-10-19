@@ -460,6 +460,12 @@ SessionPanel.model string
 SessionPanel.present bool
 SessionPanel.provider string
 SessionPanel.provider_session_id string
+SessionPanel.provider_stats.cache_read_tokens int64
+SessionPanel.provider_stats.input_tokens int64
+SessionPanel.provider_stats.messages int64
+SessionPanel.provider_stats.model_calls int64
+SessionPanel.provider_stats.output_tokens int64
+SessionPanel.provider_stats.tool_calls int64
 SessionPanel.session_id string
 SessionPanel.status string
 SystemStatus.active_dispatches int

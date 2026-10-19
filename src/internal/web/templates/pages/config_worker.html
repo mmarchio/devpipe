@@ -17,5 +17,7 @@
 <div class="field"><label for="w-to">Timeout</label><input id="w-to" name="worker_timeout" type="text" value="{{$d.Settings.worker_timeout}}">{{template "fielderror" (index .Errors "worker_timeout")}}</div>
 <div class="field"><label for="w-sp">Session Policy</label><select id="w-sp" name="session_policy">{{range $d.Policies}}<option value="{{.}}"{{if eq . $d.Worker.session_policy}} selected{{end}}>{{.}}</option>{{end}}</select></div>
 <div class="field"><label for="w-cs">Concurrent send</label><select id="w-cs" name="concurrent_send">{{range $d.SendPolicies}}<option value="{{.}}"{{if eq . $d.Worker.concurrent_send}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<div class="field"><label for="w-rf">Response formatting</label><select id="w-rf" name="response_format">{{range $d.Formats}}<option value="{{.}}"{{if eq (print .) (print $d.Worker.response_format)}} selected{{end}}>{{.Label}}</option>{{end}}</select>{{template "fielderror" (index $.Errors "response_format")}}</div>
+<p class="hint">How the worker formats its replies to commands. Statefiles keep their own Markdown layout.</p>
 <button type="submit" data-pending="Saving…">Save</button></form>
 {{end}}

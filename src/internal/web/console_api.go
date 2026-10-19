@@ -1236,6 +1236,7 @@ type workerPolicyDTO struct {
 	ConcurrentSend string `json:"concurrent_send"`
 	LeaseSeconds   int    `json:"lease_seconds"`
 	WaitSeconds    int    `json:"wait_seconds"`
+	ResponseFormat string `json:"response_format"`
 	Stored         bool   `json:"stored"`
 }
 
@@ -1255,10 +1256,10 @@ func (a *ConsoleAPI) workerSettingsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, workerPolicyDTO{SessionPolicy: string(st.SessionPolicy), ConcurrentSend: string(st.ConcurrentSend),
-		LeaseSeconds: int(st.Lease / time.Second), WaitSeconds: int(st.Wait / time.Second), Stored: stored})
+		LeaseSeconds: int(st.Lease / time.Second), WaitSeconds: int(st.Wait / time.Second), ResponseFormat: string(st.ResponseFormat), Stored: stored})
 }
 
-var workerPolicyFields = map[string]bool{"session_policy": true, "concurrent_send": true, "lease_seconds": true, "wait_seconds": true}
+var workerPolicyFields = map[string]bool{"session_policy": true, "concurrent_send": true, "lease_seconds": true, "wait_seconds": true, "response_format": true}
 
 func (a *ConsoleAPI) workerSettingsPut(w http.ResponseWriter, r *http.Request) {
 	pid, err := pathID(r, "project")
@@ -1286,6 +1287,10 @@ func (a *ConsoleAPI) workerSettingsPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.WaitSeconds >= 0 {
 		cur.Wait = time.Duration(in.WaitSeconds) * time.Second
+	}
+	// Omitted response_format keeps the stored format.
+	if in.ResponseFormat != "" {
+		cur.ResponseFormat = worker.ResponseFormat(in.ResponseFormat)
 	}
 	if err := a.Workers.UpdateWorkerSettings(r.Context(), pid, cur); err != nil {
 		WriteError(w, r, workerError(err))

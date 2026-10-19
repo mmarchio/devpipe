@@ -93,7 +93,7 @@ func (a *App) seedWorkflowDefaults(ctx context.Context) error {
 func (a *App) availabilityConfig() service.AvailabilityConfig {
 	out := service.AvailabilityConfig{MaxConcurrent: a.cfg.Engine.MaxConcurrentDispatches, ProviderMax: map[string]int{},
 		Breakers: map[string]resilience.BreakerConfig{}}
-	for name, p := range a.cfg.WorkerProviders {
+	for name, p := range a.providers.Workers() {
 		out.ProviderMax[name] = p.MaxConcurrent
 		out.Breakers[name] = resilience.BreakerConfig{Failures: p.Circuit.Failures, Window: p.Circuit.Window, Cooldown: p.Circuit.Cooldown,
 			Successes: p.Circuit.Successes}
@@ -106,7 +106,7 @@ func (a *App) availabilityConfig() service.AvailabilityConfig {
 func (a *App) compressionAvailabilityConfig() service.CompressionAvailabilityConfig {
 	out := service.CompressionAvailabilityConfig{MaxConcurrent: a.cfg.Engine.MaxConcurrentCompressions,
 		Breakers: map[string]resilience.BreakerConfig{}}
-	for name, p := range a.cfg.CompressionProviders {
+	for name, p := range a.providers.Compressors() {
 		out.Breakers[name] = resilience.BreakerConfig{Failures: p.Circuit.Failures, Window: p.Circuit.Window, Cooldown: p.Circuit.Cooldown,
 			Successes: p.Circuit.Successes}
 	}
@@ -367,7 +367,7 @@ func (a *App) systemHealth() *service.SystemHealthService {
 		func(context.Context) health.Subsystem {
 			s := health.Subsystem{Name: "repository_roots", Status: health.Healthy}
 			var roots []string
-			for _, p := range a.cfg.WorkerProviders {
+			for _, p := range a.providers.Workers() {
 				roots = append(roots, p.AllowedRoots...)
 			}
 			if len(roots) == 0 {
@@ -487,7 +487,7 @@ func (a *App) diskMonitor() *service.DiskMonitor {
 		if a.cfg.Backup.Dir != "" {
 			out = append(out, a.cfg.Backup.Dir)
 		}
-		for _, p := range a.cfg.WorkerProviders {
+		for _, p := range a.providers.Workers() {
 			out = append(out, p.AllowedRoots...)
 		}
 		rows, err := pool.Query(ctx, `SELECT DISTINCT s.canonical::jsonb->>'working_directory' FROM execution_configuration_snapshots s
@@ -596,7 +596,7 @@ func (a *App) productionReadiness() *service.ProductionReadinessService {
 			for _, e := range a.cfg.ProductionErrors() {
 				out = append(out, item("security", "configuration", fail, e.Error()))
 			}
-			if len(a.cfg.WorkerProviders) == 0 {
+			if len(a.providers.Workers()) == 0 {
 				out = append(out, item("workers", "configured", fail, "no worker provider configured"))
 			}
 			if a.cfg.Engine.MaxConcurrentDispatches == 0 {

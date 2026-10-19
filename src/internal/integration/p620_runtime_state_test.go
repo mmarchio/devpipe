@@ -96,8 +96,8 @@ func TestP620MigrationApplied(t *testing.T) {
 	if err := h.DBScan(ctx, "SELECT coalesce(max(version),0) FROM schema_migrations", &version); err != nil {
 		t.Fatalf("schema_migrations: %v", err)
 	}
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	var n int
 	if err := h.DBScan(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'runtime_state'", &n); err != nil {

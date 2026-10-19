@@ -25,13 +25,16 @@ func TestT18185DiagnosticBundles(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("P18_DIAG_CSRF", csrf)
-	r := p17NewRigWith(t, p16Options{config: func(c *config.Config) {
+	r := p17NewRigWith(t, p16Options{noBootstrap: true, config: func(c *config.Config) {
 		p := c.WorkerProviders["hermes"]
 		p.AuthSecretEnv, p.AuthSecretFile = "", tokenFile
 		c.WorkerProviders["hermes"] = p
 		c.Web.CSRFKeyEnv = "P18_DIAG_CSRF"
 	}})
+	// The gateway must accept the file token before bootstrap, which
+	// checks the worker session.
 	r.g.SetToken(token)
+	r.boot(t)
 	r.queuePlan(r.planJSON(p16Unit{key: "a"}))
 	r.queue("complete")
 	r.runUntil(t, execution.StepCompleted, 200)

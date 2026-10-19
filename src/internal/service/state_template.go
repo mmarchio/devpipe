@@ -37,9 +37,11 @@ type templateDef struct {
 }
 
 // statefileTemplate is the default workflow new projects receive.
-// v2 adds the output-format skill step (SKILL → ROUTE) every execution
-// starts with; projects created earlier keep the workflow they copied.
-var statefileTemplate = templateDef{name: "Statefile Development Workflow v2",
+// v2 added the output-format skill step (SKILL → ROUTE) every execution
+// starts with; v3 adds the replan of a task the overseer's validation keeps
+// failing the same way (VALIDATE → REPLAN → REPLAN_CHECK → IMPLEMENT).
+// Projects created earlier keep the workflow they copied.
+var statefileTemplate = templateDef{name: "Statefile Development Workflow v3",
 	description: "Command-driven development workflow over <working directory>/statefiles",
 	states:      defaultStateSpecs, transitions: defaultTransitionSpecs}
 
@@ -125,6 +127,10 @@ func defaultStateSpecs() []stateSpec {
 		{key: "TEST_CHECK", kind: state.KindControl},
 		// Overseer-run deterministic validation before acceptance.
 		{key: "VALIDATE", kind: state.KindValidation, template: "VALIDATE_WORK_UNIT"},
+		// ARCHITECT: "have the architect replan task <K>" after repeated
+		// identical validation failures; the check adopts the new task.
+		{key: "REPLAN", kind: state.KindAction, template: "CMD_REPLAN"},
+		{key: "REPLAN_CHECK", kind: state.KindControl},
 		{key: "PHASE_VALIDATE", kind: state.KindValidation, template: "PHASE_VALIDATE"},
 		{key: "PHASE_DONE", kind: state.KindControl},
 		{key: "MORE_PHASES", kind: state.KindDecision, template: "MORE_PHASES"},
@@ -172,6 +178,10 @@ func defaultTransitionSpecs() []transitionSpec {
 		{from: "TEST_CHECK", outcome: "RETRY", to: "TEST"},
 		{from: "VALIDATE", outcome: "PASS", to: "ACCEPTANCE"},
 		{from: "VALIDATE", outcome: "FAIL", to: "IMPLEMENT"},
+		{from: "VALIDATE", outcome: "REPLAN", to: "REPLAN"},
+		{from: "REPLAN", outcome: "SUBMIT", to: "REPLAN_CHECK"},
+		{from: "REPLAN_CHECK", outcome: "RETRY", to: "REPLAN"},
+		{from: "REPLAN_CHECK", outcome: "REPLANNED", to: "IMPLEMENT"},
 		{from: "PHASE_VALIDATE", outcome: "COMPLETE", to: "PHASE_DONE"},
 		{from: "PHASE_VALIDATE", outcome: "FAIL", to: "PLAN"},
 		{from: "PHASE_DONE", outcome: "EVALUATE", to: "MORE_PHASES"},

@@ -86,10 +86,14 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 	if err != nil {
 		return "", err
 	}
+	format, err := e.statefileFormat(ctx, st.rec.ProjectID)
+	if err != nil {
+		return "", err
+	}
 	if key == "CMD_SKILL" {
 		return cmd + "\n\nCreate this Hermes skill now with your skill management tool, named " + vars[CommandVarSkill] +
 			" (replace an existing skill of that name), with exactly the SKILL.md content below. Load and follow it for every command of this project. " +
-			"Reply once it is saved.\n\n````markdown\n" + feedback(OutputFormatSkill(p.Name)) + "````", nil
+			"Reply once it is saved.\n\n````markdown\n" + feedback(OutputFormatSkill(p.Name, format)) + "````", nil
 	}
 	problem, err := e.lastStatefileProblem(ctx, st)
 	if err != nil {
@@ -97,7 +101,14 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 	}
 	if problem != "" {
 		cmd += "\n\nThe statefiles you wrote for this command were rejected: " + feedback(problem) +
-			". Fix them to the layout and rules in " + GuideFile + " and redo this command." + expectedFormat()
+			". Fix them to the layout and rules in " + GuideFile + " and redo this command." + expectedFormat(format)
+	}
+	if key == "CMD_REPLAN" {
+		rc, err := e.replanContext(ctx, st, format)
+		if err != nil {
+			return "", err
+		}
+		return cmd + rc, nil
 	}
 	if key != "CMD_PLAN" {
 		return cmd, nil
@@ -125,13 +136,13 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 			}
 		}
 		cmd += "\n\nThe previous plan was rejected:\n" + feedback(strings.Join(lines, "\n")) + "\nFix every problem (also listed in " +
-			wbs.PlanRejectedFile + ") and rewrite " + wbs.BacklogFile + "; do not keep the files as they are." + expectedFormat()
+			wbs.PlanRejectedFile + ") and rewrite " + wbs.BacklogFile + "; do not keep the files as they are." + expectedFormat(format)
 		return cmd, nil
 	}
 	if abs, err := statefile.SafeRelPath(st.cwd(), wbs.PlanRejectedFile); err == nil {
 		if _, err := os.Stat(abs); err == nil {
 			cmd += "\n\nThe previous plan was rejected. Fix every problem listed in " + wbs.PlanRejectedFile +
-				" and rewrite " + wbs.BacklogFile + "; do not keep the files as they are." + expectedFormat()
+				" and rewrite " + wbs.BacklogFile + "; do not keep the files as they are." + expectedFormat(format)
 		}
 	}
 	return cmd, nil
@@ -139,8 +150,22 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 
 // expectedFormat is the task file layout a resent command carries, so the
 // team can fix its files without looking the format up.
-func expectedFormat() string {
-	return "\n\nExpected format:\n\n" + TaskFileFormat()
+func expectedFormat(format worker.ResponseFormat) string {
+	return "\n\nExpected format:\n\n" + TaskFileFormat(format)
+}
+
+// statefileFormat is the project's statefile format: its worker response
+// format (Markdown when no worker service is wired). Task files are read
+// in either format; this decides what the team is told to write.
+func (e *Engine) statefileFormat(ctx context.Context, projectID uuid.UUID) (worker.ResponseFormat, error) {
+	if e.d.Worker == nil {
+		return worker.FormatMarkdown, nil
+	}
+	ws, _, err := e.d.Worker.WorkerSettings(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	return ws.ResponseFormat.OrDefault(), nil
 }
 
 // feedback makes problem text safe to send in a command: a placeholder
@@ -475,6 +500,19 @@ func writeStatefile(cwd, rel, content string) error {
 	return os.Rename(tmp, abs)
 }
 
+// removeStatefile removes rel under the working directory (confined like
+// writeStatefile); a missing file is not an error.
+func removeStatefile(cwd, rel string) error {
+	abs, err := statefile.SafeRelPath(cwd, rel)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // readPlanningDoc reads a statefile the team wrote under the working
 // directory. The problem is non-empty when the file is missing, unsafe,
 // empty or too large.
@@ -782,7 +820,11 @@ func (e *Engine) handleTestCheck(ctx context.Context, st *engineState, step *per
 	if files[wbs.ActiveTaskFile] == FileUnchanged && (t.Status != wbs.TaskStatusComplete || !t.AllMet()) {
 		// Nothing was recorded: not a failed test, so the engineer does
 		// not get the task again; the tester is asked to record it.
-		return e.statefileRetry(ctx, st, step, reasonTestNotRecorded, refs)
+		format, err := e.statefileFormat(ctx, st.rec.ProjectID)
+		if err != nil {
+			return execution.StepResult{}, err
+		}
+		return e.statefileRetry(ctx, st, step, reasonTestNotRecorded(format), refs)
 	}
 	ev := map[string]any{"work_unit_id": st.unit.ID.String(), "status": t.Status, "met": t.Met, "files": files}
 	refs.Detail = ev
@@ -802,9 +844,12 @@ func (e *Engine) handleTestCheck(ctx context.Context, st *engineState, step *per
 
 // reasonTestNotRecorded is the problem of a test command whose result was
 // not written to ACTIVE_TASK.md (the file is byte-for-byte unchanged).
-const reasonTestNotRecorded = "the tester did not record the test result: " + wbs.ActiveTaskFile + " is unchanged since the test command was sent. " +
-	"Check [x] each acceptance criterion that is met and set Status: COMPLETE when all are met; otherwise leave the status and note what fails under ### Instructions. " +
-	"A result reported only in the reply is not read"
+func reasonTestNotRecorded(format worker.ResponseFormat) string {
+	sx := syntaxFor(format)
+	return "the tester did not record the test result: " + wbs.ActiveTaskFile + " is unchanged since the test command was sent. " +
+		"Check " + sx.checked() + " each acceptance criterion that is met and set " + sx.status("COMPLETE") + " when all are met; otherwise leave the status and note what fails " +
+		strings.ReplaceAll(sx.notes(), "`", "") + ". A result reported only in the reply is not read"
+}
 
 // toValidating moves a unit to VALIDATING (its tester reported every
 // criterion met; overseer validation follows).

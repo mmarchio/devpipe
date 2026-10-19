@@ -251,7 +251,7 @@ func ErrFieldsOf(err error) map[string]string {
 // DefaultStateRoles are the default workflow's state → role assignments
 // (in order) a new project receives; each assigned role is allowed the
 // state. "plan phase <N>" is worked by the ARCHITECT, then the PLANNER.
-var DefaultStateRoles = map[string][]string{"SKILL": {"PROJECT_MANAGER"}, "PLAN": {"ARCHITECT", "PLANNER"}, "ACCEPTANCE": {"PROJECT_MANAGER"},
+var DefaultStateRoles = map[string][]string{"SKILL": {"PROJECT_MANAGER"}, "REPLAN": {"ARCHITECT"}, "PLAN": {"ARCHITECT", "PLANNER"}, "ACCEPTANCE": {"PROJECT_MANAGER"},
 	"IMPLEMENT": {"ENGINEER"}, "CONTINUE": {"ENGINEER"}, "TEST": {"TESTER"}, "HARDENING_FIX": {"ENGINEER"},
 	"VALIDATE": {"TESTER"}, "PHASE_VALIDATE": {"TESTER"}}
 

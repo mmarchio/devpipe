@@ -63,10 +63,12 @@ type Message struct {
 	// Content is the last (user) message without its leading
 	// "change working directory to <path>" line, Dir that path ("" when
 	// the prompt had none); Messages the full body list.
-	Content  string
-	Dir      string
-	Model    string
-	Stream   bool
+	Content string
+	Dir     string
+	Model   string
+	Stream  bool
+	// Grammar is the request's GBNF grammar ("" when none was sent).
+	Grammar  string
 	Messages []ChatMessage
 	// Metadata is the X-Overseer-Metadata header object.
 	Metadata map[string]string
@@ -102,6 +104,10 @@ type Gateway struct {
 	healthErr int
 	healthHit int
 	paths     []string
+	// hermesIDs are the X-Hermes-Session-Id values received; deleted the
+	// sessions deleted through DELETE /api/sessions/{id}.
+	hermesIDs map[string]int
+	deleted   []string
 
 	// Token, when set, is required as the bearer token.
 	Token string
@@ -116,7 +122,8 @@ type Gateway struct {
 
 // New starts a gateway.
 func New() *Gateway {
-	g := &Gateway{sessions: map[string]*session{}, killed: map[string]bool{}, cdFail: map[string]bool{}, seen: map[string]bool{}, ProviderVersion: "hermes-fake-1.0", ContextPerMessage: 1000}
+	g := &Gateway{sessions: map[string]*session{}, killed: map[string]bool{}, cdFail: map[string]bool{}, seen: map[string]bool{}, hermesIDs: map[string]int{},
+		ProviderVersion: "hermes-fake-1.0", ContextPerMessage: 1000}
 	g.Server = httptest.NewServer(http.HandlerFunc(g.serve))
 	return g
 }
@@ -270,10 +277,58 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/models":
 		g.models(w)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/chat/completions":
+		if hid := r.Header.Get("X-Hermes-Session-Id"); hid != "" {
+			g.mu.Lock()
+			g.hermesIDs[hid]++
+			g.mu.Unlock()
+		}
 		g.completion(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/sessions/") && (r.Method == http.MethodGet || r.Method == http.MethodDelete):
+		g.hermesSession(w, r.Method, strings.TrimPrefix(r.URL.Path, "/api/sessions/"))
 	default:
 		writeErr(w, http.StatusNotFound, "not_found", "no route", 0)
 	}
+}
+
+// hermesSession serves Hermes's session resource: GET returns the
+// session's counters, DELETE removes it (session_not_found when unknown).
+func (g *Gateway) hermesSession(w http.ResponseWriter, method, id string) {
+	g.mu.Lock()
+	n, known := g.hermesIDs[id]
+	if known && method == http.MethodDelete {
+		delete(g.hermesIDs, id)
+		g.deleted = append(g.deleted, id)
+	}
+	g.mu.Unlock()
+	if !known {
+		writeErr(w, http.StatusNotFound, "session_not_found", "Session not found: "+id, 0)
+		return
+	}
+	if method == http.MethodDelete {
+		writeJSON(w, http.StatusOK, map[string]any{"object": "hermes.session.deleted", "id": id, "deleted": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "hermes.session", "session": map[string]any{"id": id, "message_count": 2 * n,
+		"api_call_count": n, "tool_call_count": 0, "input_tokens": 100 * n, "output_tokens": 10 * n, "cache_read_tokens": 0}})
+}
+
+// HermesSessions returns the Hermes session ids requests were filed under
+// and not yet deleted.
+func (g *Gateway) HermesSessions() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]string, 0, len(g.hermesIDs))
+	for id := range g.hermesIDs {
+		out = append(out, id)
+	}
+	return out
+}
+
+// DeletedSessions returns the Hermes sessions deleted, in order.
+func (g *Gateway) DeletedSessions() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.deleted...)
 }
 
 func (g *Gateway) models(w http.ResponseWriter) {
@@ -337,6 +392,7 @@ func (g *Gateway) completion(w http.ResponseWriter, r *http.Request) {
 		Model    string        `json:"model"`
 		Messages []ChatMessage `json:"messages"`
 		Stream   bool          `json:"stream"`
+		Grammar  string        `json:"grammar"`
 	}
 	if err := json.Unmarshal(raw, &in); err != nil || len(in.Messages) == 0 {
 		writeErr(w, http.StatusBadRequest, "invalid_request", "messages required", 0)
@@ -376,7 +432,7 @@ func (g *Gateway) completion(w http.ResponseWriter, r *http.Request) {
 	}
 	if s != nil {
 		msg := Message{SessionID: id, RequestID: rid, DispatchKey: r.Header.Get("X-Overseer-Dispatch-Key"),
-			Auth: r.Header.Get("Authorization"), Content: last, Dir: dir, Model: in.Model, Stream: in.Stream, Messages: in.Messages, Metadata: md, At: time.Now()}
+			Auth: r.Header.Get("Authorization"), Content: last, Dir: dir, Model: in.Model, Stream: in.Stream, Grammar: in.Grammar, Messages: in.Messages, Metadata: md, At: time.Now()}
 		g.messages = append(g.messages, msg)
 		g.opLocked(id, "msg")
 		if !scripted && g.Responder != nil && !s.busy {

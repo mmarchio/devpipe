@@ -72,8 +72,8 @@ func TestP813MigrationApplied(t *testing.T) {
 	}
 	// Bumped 42 -> 43 by P8-13 (migration 00043, response_protocols) —
 	// accepted contract change, not a weakened test.
-	if version != 126 {
-		t.Fatalf("max migration version = %d, want 82", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("max migration version = %d, want %d", version, want)
 	}
 	for _, tbl := range []string{"response_protocols", "response_protocol_versions", "state_protocol_references"} {
 		var n int

@@ -501,17 +501,20 @@ type Flow struct {
 
 // SessionPanel is the worker session panel (WBS 17.82).
 type SessionPanel struct {
-	Present      bool         `json:"present"`
-	Provider     string       `json:"provider"`
-	SessionID    string       `json:"session_id"`
-	ProviderSess string       `json:"provider_session_id"`
-	Status       string       `json:"status"`
-	Model        string       `json:"model"`
-	Context      ContextUsage `json:"context"`
-	CWD          string       `json:"cwd"`
-	CreatedAt    *time.Time   `json:"created_at,omitempty"`
-	LastActivity *time.Time   `json:"last_activity,omitempty"`
-	Connection   string       `json:"connection"`
+	Present      bool   `json:"present"`
+	Provider     string `json:"provider"`
+	SessionID    string `json:"session_id"`
+	ProviderSess string `json:"provider_session_id"`
+	// ProviderStats are the provider's own counters for the session
+	// (totals over the session; nil when the provider reports none).
+	ProviderStats *ProviderSessionStats `json:"provider_stats,omitempty"`
+	Status        string                `json:"status"`
+	Model         string                `json:"model"`
+	Context       ContextUsage          `json:"context"`
+	CWD           string                `json:"cwd"`
+	CreatedAt     *time.Time            `json:"created_at,omitempty"`
+	LastActivity  *time.Time            `json:"last_activity,omitempty"`
+	Connection    string                `json:"connection"`
 }
 
 // WorkerResult is a structured worker report (WBS 17.84): ADVISORY.
@@ -662,4 +665,15 @@ type DriftItem struct {
 	Source  string `json:"source"`
 	Section string `json:"section"`
 	Detail  string `json:"detail"`
+}
+
+// ProviderSessionStats are a worker provider session's running counters
+// (Hermes /api/sessions/{id}).
+type ProviderSessionStats struct {
+	Messages        int64 `json:"messages"`
+	ToolCalls       int64 `json:"tool_calls"`
+	ModelCalls      int64 `json:"model_calls"`
+	InputTokens     int64 `json:"input_tokens"`
+	OutputTokens    int64 `json:"output_tokens"`
+	CacheReadTokens int64 `json:"cache_read_tokens"`
 }
