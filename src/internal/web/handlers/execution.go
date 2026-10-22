@@ -409,7 +409,7 @@ func (c *Console) recoveryPage(w http.ResponseWriter, r *http.Request) {
 	if !c.load(w, r, "/api/v1/projects/"+pid(r)+"/executions/"+url.PathEscape(r.PathValue("execution"))+"/recovery", &rec) {
 		return
 	}
-	c.render(w, r, http.StatusOK, "recovery", viewmodels.Page{Shell: c.projectShell(r, "Recovery", ov), Data: rec})
+	c.render(w, r, http.StatusOK, "recovery", viewmodels.Page{Shell: c.projectShell(r, "Recovery", ov), Data: c.recoveryView(r, rec)})
 }
 
 // recoveryAction — POST .../recovery: a backend-approved typed action with
@@ -442,7 +442,7 @@ func (c *Console) recoveryAction(w http.ResponseWriter, r *http.Request) {
 		c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/executions/"+url.PathEscape(r.PathValue("execution"))+"/recovery", &rec)
 		msg := "Dry run — nothing was changed. Would change: " + strings.Join(out.DryRun.Records, "; ") +
 			". External operations: " + strings.Join(out.DryRun.ExternalOperations, "; ") + "."
-		c.render(w, r, http.StatusOK, "recovery", viewmodels.Page{Shell: c.projectShell(r, "Recovery", ov), Data: rec, Message: msg})
+		c.render(w, r, http.StatusOK, "recovery", viewmodels.Page{Shell: c.projectShell(r, "Recovery", ov), Data: c.recoveryView(r, rec), Message: msg})
 		return
 	}
 	if !resp.OK() {
@@ -453,10 +453,100 @@ func (c *Console) recoveryAction(w http.ResponseWriter, r *http.Request) {
 		var rec readmodel.Recovery
 		c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/executions/"+url.PathEscape(r.PathValue("execution"))+"/recovery", &rec)
 		_, msg, _ := resp.Error()
-		c.render(w, r, resp.Status, "recovery", viewmodels.Page{Shell: c.projectShell(r, "Recovery", ov), Data: rec, Message: msg})
+		c.render(w, r, resp.Status, "recovery", viewmodels.Page{Shell: c.projectShell(r, "Recovery", ov), Data: c.recoveryView(r, rec), Message: msg})
 		return
 	}
 	redirect(w, r, "/projects/"+pid(r)+"/executions/"+url.PathEscape(r.PathValue("execution"))+"/recovery", "Recovery action performed.")
+}
+
+// recoveryView is the recovery page: the recovery read model plus the task
+// analysis / fix panel (embedded, so the page reads the recovery fields
+// directly).
+type recoveryView struct {
+	readmodel.Recovery
+	TaskOps taskOpsData
+}
+
+// taskOpsData is the task analysis / fix panel (frag-task-ops).
+type taskOpsData struct {
+	ProjectID   string
+	ExecutionID string
+	CSRF        string
+	Ops         taskOps
+}
+
+// taskOps mirrors the task-ops API.
+type taskOps struct {
+	Available   bool   `json:"available"`
+	Task        string `json:"task"`
+	Running     string `json:"running"`
+	Interrupted string `json:"interrupted"`
+	Analysis    *struct {
+		At            time.Time `json:"at"`
+		Fixable       bool      `json:"fixable"`
+		Findings      []string  `json:"findings"`
+		Optimizations []string  `json:"optimizations"`
+		Error         string    `json:"error"`
+	} `json:"analysis"`
+	FixEnabled bool `json:"fix_enabled"`
+	Fix        *struct {
+		At                time.Time `json:"at"`
+		Success           bool      `json:"success"`
+		Message           string    `json:"message"`
+		DefinitionChanged bool      `json:"definition_changed"`
+	} `json:"fix"`
+}
+
+func (c *Console) recoveryView(r *http.Request, rec readmodel.Recovery) recoveryView {
+	return recoveryView{Recovery: rec, TaskOps: c.taskOpsOf(r, r.PathValue("execution"))}
+}
+
+func (c *Console) taskOpsOf(r *http.Request, execID string) taskOpsData {
+	d := taskOpsData{ProjectID: pid(r), ExecutionID: execID, CSRF: c.d.CSRF(r)}
+	c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/executions/"+url.PathEscape(execID)+"/task-ops", &d.Ops)
+	return d
+}
+
+// fragTaskOps — the task analysis / fix panel region.
+func (c *Console) fragTaskOps(w http.ResponseWriter, r *http.Request) {
+	c.fragment(w, r, "frag-task-ops", c.taskOpsOf(r, r.URL.Query().Get("execution")))
+}
+
+// taskOp — POST .../recovery/analyze | fix: starts the ARCHITECT's task
+// analysis or fix; the panel reports progress and the outcome. From the
+// overview (back=overview) it returns to the overview.
+func (c *Console) taskOp(op string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		exec := url.PathEscape(r.PathValue("execution"))
+		fromOverview := r.PostFormValue("back") == "overview"
+		back, screen := "/projects/"+pid(r)+"/executions/"+exec+"/recovery", "the recovery screen"
+		if fromOverview {
+			back, screen = "/projects/"+pid(r), "the overview"
+		}
+		resp := c.d.API.Do(r, http.MethodPost, "/api/v1/projects/"+pid(r)+"/executions/"+exec+"/task-ops/"+op, nil, "task "+op+" from "+screen)
+		if !resp.OK() && fromOverview {
+			_, msg, _ := resp.Error()
+			redirectKind(w, r, back, msg, "warn")
+			return
+		}
+		if !resp.OK() {
+			ov, ok := c.overview(w, r)
+			if !ok {
+				return
+			}
+			var rec readmodel.Recovery
+			c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/executions/"+exec+"/recovery", &rec)
+			_, msg, _ := resp.Error()
+			c.render(w, r, resp.Status, "recovery", viewmodels.Page{Shell: c.projectShell(r, "Recovery", ov), Data: c.recoveryView(r, rec), Message: msg})
+			return
+		}
+		msg := "Task analysis started: the architect is analyzing the task."
+		if op == "fix" {
+			msg = "Task fix started: the architect is implementing the optimizations."
+		}
+		redirect(w, r, back, msg)
+	}
 }
 
 // fragRecovery — the recovery banner region.

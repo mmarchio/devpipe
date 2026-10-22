@@ -38,7 +38,7 @@ func TestOutputFormatSkillResponseFormat(t *testing.T) {
 	for f, want := range map[worker.ResponseFormat][]string{
 		worker.FormatMarkdown: {"Format every reply as Markdown", "## Blockers", "formatted as Markdown"},
 		worker.FormatXML:      {"Format every reply as XML", "<reply>", "<summary>", "formatted as XML"},
-		worker.FormatKeyValue: {"Format every reply as `key: value` lines", "summary: ", "blocker: none", "formatted as key:value", GrammarFile},
+		worker.FormatKeyValue: {"Format every reply as `key: value` lines", "summary: ", "blocker: none", "formatted as key:value"},
 	} {
 		s := OutputFormatSkill("P", f)
 		for _, w := range want {

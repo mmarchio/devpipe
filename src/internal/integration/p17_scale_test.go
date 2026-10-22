@@ -2,7 +2,9 @@ package integration
 
 import (
 	"context"
+	"html"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -84,6 +86,17 @@ func TestP17130LargeProject(t *testing.T) {
 	body = r.b.mustPage("/projects/" + pid + "/phases/" + r.phases[1].String() + "/work-units")
 	if n := strings.Count(body, `<a href="/projects/`+pid+`/work-units/`); n != 50 || !strings.Contains(body, "of 5000") {
 		t.Fatalf("units page rows %d", n)
+	}
+	// Page 2: the live refresh reloads the same page, not the first one.
+	unitLinks := regexp.MustCompile(`<a href="/projects/[^"]+/work-units/[^"]+"`)
+	page2 := r.b.mustPage("/projects/" + pid + "/phases/" + r.phases[1].String() + "/work-units?offset=50&limit=50")
+	m := regexp.MustCompile(`data-fragment-url="(/projects/[^"]+/fragments/units\?[^"]+)"`).FindStringSubmatch(page2)
+	if m == nil || !strings.Contains(html.UnescapeString(m[1]), "offset=50") {
+		t.Fatalf("units fragment URL %q", m)
+	}
+	rows2, refreshed := unitLinks.FindAllString(page2, -1), unitLinks.FindAllString(r.b.mustPage(html.UnescapeString(m[1])), -1)
+	if len(rows2) != 50 || strings.Join(refreshed, "") != strings.Join(rows2, "") || strings.Contains(body, rows2[0]) {
+		t.Fatalf("page 2 rows %d, refreshed %d (same as page 2: %t)", len(rows2), len(refreshed), strings.Join(refreshed, "") == strings.Join(rows2, ""))
 	}
 	body = r.b.mustPage("/projects/" + pid + "/phases")
 	if strings.Count(body, "<tr") > 60 {

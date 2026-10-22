@@ -23,6 +23,17 @@ func TestP1714AllowedActions(t *testing.T) {
 		{ControlFacts{ProjectStatus: "CANCELLED", HasExecution: true, ExecutionStatus: ExecutionCancelled}, nil},
 		{ControlFacts{ProjectStatus: "FAILED"}, nil},
 		{ControlFacts{ProjectStatus: "DRAFT"}, []ControlAction{ControlCancel}},
+		// Pause after task: statefile executions only, between Pause and Cancel.
+		{ControlFacts{ProjectStatus: "RUNNING", HasExecution: true, ExecutionStatus: ExecutionRunning, Statefile: true},
+			[]ControlAction{ControlPause, ControlPauseAfterTask, ControlStep, ControlCancel}},
+		{ControlFacts{ProjectStatus: "RUNNING", HasExecution: true, ExecutionStatus: ExecutionRunning, Statefile: true, PauseAfterTask: true},
+			[]ControlAction{ControlPause, ControlCancelPauseAfterTask, ControlStep, ControlCancel}},
+		{ControlFacts{ProjectStatus: "PAUSED", HasExecution: true, ExecutionStatus: ExecutionPaused, Statefile: true},
+			[]ControlAction{ControlResume, ControlCancel}},
+		{ControlFacts{ProjectStatus: "PAUSED", HasExecution: true, ExecutionStatus: ExecutionPaused, Statefile: true, PauseAfterTask: true},
+			[]ControlAction{ControlResume, ControlCancelPauseAfterTask, ControlCancel}},
+		{ControlFacts{ProjectStatus: "RUNNING", HasExecution: true, ExecutionStatus: ExecutionRecovery, Statefile: true},
+			[]ControlAction{ControlCancel, ControlResolveRecovery}},
 	}
 	for _, c := range cases {
 		if got := AllowedActions(c.f); !reflect.DeepEqual(got, c.want) {

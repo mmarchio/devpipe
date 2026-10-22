@@ -161,6 +161,11 @@ func (e *Engine) ResolveRecovery(ctx context.Context, projectID, executionID uui
 	if rec.Status != execution.ExecutionRecovery {
 		return nil, ErrConflict
 	}
+	if e.taskOpRunning(executionID) {
+		// The ARCHITECT is analyzing or fixing the task in the worker
+		// session; the engine must not start sending meanwhile.
+		return nil, ErrTaskOpRunning
+	}
 	switch r.Action {
 	case RecoveryResume, RecoveryRetryStep:
 	case RecoveryApproveCriteria:

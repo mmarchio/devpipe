@@ -11,12 +11,18 @@ import "strings"
 type ControlAction string
 
 const (
-	ControlStart           ControlAction = "START"
-	ControlPause           ControlAction = "PAUSE"
-	ControlResume          ControlAction = "RESUME"
-	ControlCancel          ControlAction = "CANCEL"
+	ControlStart  ControlAction = "START"
+	ControlPause  ControlAction = "PAUSE"
+	ControlResume ControlAction = "RESUME"
+	ControlCancel ControlAction = "CANCEL"
+	// ControlRequeue restarts the current task from the beginning.
+	ControlRequeue         ControlAction = "REQUEUE"
 	ControlStep            ControlAction = "STEP"
 	ControlResolveRecovery ControlAction = "RESOLVE_RECOVERY"
+	// ControlPauseAfterTask pauses once the next task is loaded, before
+	// work on it begins; ControlCancelPauseAfterTask withdraws the request.
+	ControlPauseAfterTask       ControlAction = "PAUSE_AFTER_TASK"
+	ControlCancelPauseAfterTask ControlAction = "CANCEL_PAUSE_AFTER_TASK"
 )
 
 // ControlFacts are the persisted facts AllowedActions decides from.
@@ -26,6 +32,13 @@ type ControlFacts struct {
 	HasExecution    bool
 	ExecutionStatus ExecutionStatus
 	ReadinessOK     bool
+	// Requeueable: the execution runs the statefile workflow and has a
+	// current task that is not DONE.
+	Requeueable bool
+	// Statefile: the execution runs the statefile workflow.
+	Statefile bool
+	// PauseAfterTask: a pause after the current task is requested.
+	PauseAfterTask bool
 }
 
 // AllowedActions returns the ordered control actions legal for the facts
@@ -48,6 +61,13 @@ func AllowedActions(f ControlFacts) []ControlAction {
 		if !recovery {
 			out = append(out, ControlPause)
 		}
+		if execActive && !recovery && f.Statefile {
+			if f.PauseAfterTask {
+				out = append(out, ControlCancelPauseAfterTask)
+			} else {
+				out = append(out, ControlPauseAfterTask)
+			}
+		}
 		if execActive && !recovery && (f.ExecutionStatus == ExecutionRunning || f.ExecutionStatus == ExecutionWaiting) {
 			out = append(out, ControlStep)
 		}
@@ -56,7 +76,26 @@ func AllowedActions(f ControlFacts) []ControlAction {
 		if !recovery {
 			out = append(out, ControlResume)
 		}
+		if execActive && f.Statefile && f.PauseAfterTask {
+			out = append(out, ControlCancelPauseAfterTask)
+		}
 		out = append(out, ControlCancel)
+	}
+	live := false
+	if f.HasExecution {
+		switch f.ExecutionStatus {
+		case ExecutionRunning, ExecutionWaiting, ExecutionPaused, ExecutionRecovery:
+			live = true
+		}
+	}
+	if f.Requeueable && live && (f.ProjectStatus == "RUNNING" || f.ProjectStatus == "PAUSED") {
+		// Offered next to Cancel.
+		for i, a := range out {
+			if a == ControlCancel {
+				out = append(out[:i+1], append([]ControlAction{ControlRequeue}, out[i+1:]...)...)
+				break
+			}
+		}
 	}
 	if recovery && (f.ProjectStatus == "RUNNING" || f.ProjectStatus == "PAUSED") {
 		out = append(out, ControlResolveRecovery)
@@ -222,7 +261,8 @@ func CategoryOf(t EventType) EventCategory {
 	switch t {
 	case EventPlanActivated, EventPlanRejected, EventPlanAmended:
 		return EventCatPlanning
-	case EventUnitClaimed, EventDispatchIntent, EventExecutionWaiting, EventUnitDone:
+	case EventUnitClaimed, EventDispatchIntent, EventExecutionWaiting, EventUnitDone, EventUnitRequeueRequested, EventUnitRequeued,
+		EventPauseAfterTaskRequested, EventPauseAfterTaskCancelled, EventPauseAfterTaskApplied:
 		return EventCatWorker
 	case EventValidationStarted, EventValidationPassed, EventValidationFailed, EventValidationInfraError, EventFixAttempt,
 		EventFinalValidationPassed, EventFinalValidationFailed:
@@ -233,7 +273,8 @@ func CategoryOf(t EventType) EventCategory {
 		EventHardeningStarted, EventHardeningAnalyzed, EventHardeningOperation, EventHardeningGroupDone,
 		EventHardeningGroupSkipped, EventHardeningCompleted:
 		return EventCatPhase
-	case EventRecoveryRequired, EventRecoveryResolved, EventBootstrapFailed:
+	case EventRecoveryRequired, EventRecoveryResolved, EventBootstrapFailed,
+		EventUnitAnalysisStarted, EventUnitAnalyzed, EventUnitFixStarted, EventUnitFixed, EventUnitRepeatDetected:
 		return EventCatRecovery
 	}
 	return EventCatSystem

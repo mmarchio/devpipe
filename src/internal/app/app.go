@@ -821,6 +821,11 @@ func (a *App) Start(ctx context.Context) error {
 		if a.engine != nil {
 			a.engine.OnProjectStatus(ctx, projectID, status)
 		}
+	}).WithResumeGuard(func(ctx context.Context, projectID uuid.UUID) error {
+		if a.engine != nil {
+			return a.engine.ResumeBlocked(ctx, projectID)
+		}
+		return nil
 	})
 	a.lifecycleSvc = lifecycleSvc
 	readySvc := service.NewReadinessService(

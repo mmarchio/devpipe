@@ -10,6 +10,7 @@
 <ul>{{range .}}<li>{{.Section}} ({{.Source}}): {{.Detail}}</li>{{end}}</ul>
 </section>{{end}}
 <div data-fragment-url="/projects/{{$o.ProjectID}}/fragments/actions">{{template "frag-actions" .Data.Actions}}</div>
+<div data-fragment-url="/projects/{{$o.ProjectID}}/fragments/task-ops-overview">{{template "frag-task-ops-overview" .Data.TaskOps}}</div>
 <div data-fragment-url="/projects/{{$o.ProjectID}}/fragments/overview">{{template "frag-overview" $o}}</div>
 <div class="grid">
 <div data-fragment-url="/projects/{{$o.ProjectID}}/fragments/current-task">{{template "frag-current-task" $o.CurrentTask}}</div>

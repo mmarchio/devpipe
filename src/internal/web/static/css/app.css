@@ -92,6 +92,8 @@ button.secondary, .button.secondary { background: #fff; color: var(--accent); }
 button.danger, .button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 button[disabled], button[aria-busy="true"] { opacity: .6; cursor: progress; }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .5rem 0 1rem; }
+/* Last in the row, against its right edge (e.g. the overview's Cancel). */
+.actions .actions-end { order: 1; margin-left: auto; }
 .filters { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: flex-end; margin-bottom: .8rem; }
 .filters .field { margin: 0; }
 .filters input, .filters select { width: auto; }

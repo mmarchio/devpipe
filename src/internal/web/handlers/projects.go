@@ -159,12 +159,15 @@ type actionsData struct {
 	ExecutionID string
 	Actions     []string
 	CSRF        string
+	// TaskOps enables the Analyze / Fix task buttons (zero: both disabled).
+	TaskOps taskOps
 }
 
 type overviewData struct {
 	Overview *readmodel.Overview
 	Flows    []readmodel.Flow
 	Actions  actionsData
+	TaskOps  taskOpsData
 	Drift    readmodel.ConfigDrift
 }
 
@@ -172,8 +175,17 @@ func (c *Console) actionsOf(r *http.Request, ov *readmodel.Overview) actionsData
 	a := actionsData{ProjectID: ov.ProjectID, Actions: ov.Actions, CSRF: c.d.CSRF(r)}
 	if ov.Execution != nil {
 		a.ExecutionID = ov.Execution.ID
+		c.d.API.Get(r, "/api/v1/projects/"+url.PathEscape(ov.ProjectID)+"/executions/"+url.PathEscape(a.ExecutionID)+"/task-ops", &a.TaskOps)
 	}
 	return a
+}
+
+// overviewTaskOps is the overview's task analysis / fix status region.
+func (c *Console) overviewTaskOps(r *http.Request, ov *readmodel.Overview) taskOpsData {
+	if ov.Execution == nil {
+		return taskOpsData{ProjectID: ov.ProjectID}
+	}
+	return c.taskOpsOf(r, ov.Execution.ID)
 }
 
 func (c *Console) flows(r *http.Request) []readmodel.Flow {
@@ -194,7 +206,8 @@ func (c *Console) overviewPage(w http.ResponseWriter, r *http.Request) {
 	shell.LiveAfter = ov.LatestEventSeq
 	var drift readmodel.ConfigDrift
 	c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/config-drift", &drift)
-	c.render(w, r, http.StatusOK, "overview", viewmodels.Page{Shell: shell, Data: overviewData{Overview: ov, Flows: c.flows(r), Actions: c.actionsOf(r, ov), Drift: drift}})
+	c.render(w, r, http.StatusOK, "overview", viewmodels.Page{Shell: shell, Data: overviewData{Overview: ov, Flows: c.flows(r), Actions: c.actionsOf(r, ov),
+		TaskOps: c.overviewTaskOps(r, ov), Drift: drift}})
 }
 
 // fragment handlers (WBS 17.74 / 17.79): the same read models as the page
@@ -224,6 +237,15 @@ func (c *Console) fragActions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.fragment(w, r, "frag-actions", c.actionsOf(r, &ov))
+}
+
+func (c *Console) fragTaskOpsOverview(w http.ResponseWriter, r *http.Request) {
+	var ov readmodel.Overview
+	if resp := c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/overview", &ov); !resp.OK() {
+		http.Error(w, "unavailable", resp.Status)
+		return
+	}
+	c.fragment(w, r, "frag-task-ops-overview", c.overviewTaskOps(r, &ov))
 }
 
 func (c *Console) fragFlows(w http.ResponseWriter, r *http.Request) {

@@ -129,9 +129,7 @@ func (s *WorkerService) admit(ctx context.Context, req DispatchRequest, id uuid.
 		}
 		return nil, translate(err)
 	}
-	// A key:value project constrains every reply with its GBNF grammar.
 	wreq := worker.WorkerRequest{RequestID: d.RequestID, ProjectID: d.ProjectID, PhaseID: d.PhaseID, WorkUnitID: d.WorkUnitID, Prompt: *wp,
-		Grammar:  st.ResponseFormat.Grammar(),
 		Metadata: worker.WorkerRequestMetadata{RuntimeStateID: d.RuntimeStateID, StateKey: d.StateKey, RoleKey: d.RoleKey, PromptHash: wp.Hash, Attempt: d.Attempt}}
 	return &admitted{d: d, sess: sess, lease: st.Lease, prompt: wreq}, nil
 }

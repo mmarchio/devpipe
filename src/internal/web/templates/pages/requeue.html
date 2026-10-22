@@ -1,0 +1,15 @@
+{{define "title"}}Requeue task — {{.Shell.Project.Name}}{{end}}
+{{define "content"}}
+{{$t := .Data.CurrentTask}}
+<h1>Requeue task</h1>
+{{if $t}}<p>Task <strong>{{$t.Key}} {{$t.Name}}</strong> restarts from the beginning.</p>{{else}}<p class="muted">The execution has no active task to requeue.</p>{{end}}
+<div class="banner warn"><strong>! Restarts the task</strong>
+Requeueing stops the task's execution, clears the worker context (a new session) and <span class="mono">statefiles/ACTIVE_TASK.md</span>, resets the task to TODO with its acceptance criteria unchecked in <span class="mono">statefiles/BACKLOG.md</span>, resets its fix and retry counters, and sends the project manager to load it again. Code changes already made in the repository are kept. A worker command that is already running is not interrupted: the requeue then applies as soon as it finishes.</div>
+<form method="post" action="/projects/{{.Shell.Project.ID}}/requeue">
+{{template "csrf" .Shell.CSRF}}
+<div class="field"><label for="reason">Reason</label><input id="reason" type="text" name="reason" required maxlength="2000"></div>
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> Restart this task from the beginning.</label></div>
+<button type="submit" data-pending="Requeueing…">Requeue task</button>
+<a class="button secondary" href="/projects/{{.Shell.Project.ID}}">Keep running</a>
+</form>
+{{end}}

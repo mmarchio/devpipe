@@ -4,15 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"overseer/internal/gateway/hermes/hermestest"
-	"overseer/internal/service"
-	"overseer/internal/worker"
 )
 
 // TestP19WorkerResponseFormat — the worker configuration page selects the
@@ -99,43 +95,5 @@ func TestP19WorkerResponseFormat(t *testing.T) {
 	}
 	if strings.Contains(skill, "Format every reply as Markdown") {
 		t.Fatalf("skill command still asks for Markdown:\n%s", skill)
-	}
-
-	// key:value: the overseer writes the GBNF guide file and sends the
-	// grammar as a string with every workflow command.
-	if g, err := os.ReadFile(filepath.Join(r.dir, service.GrammarFile)); err != nil || string(g) != worker.KeyValueGrammar {
-		t.Fatalf("%s: %q %v", service.GrammarFile, g, err)
-	}
-	cmds := 0
-	for _, m := range r.g.Messages() {
-		if m.Dir == "" { // the session's "change working directory" prompt
-			continue
-		}
-		cmds++
-		if m.Grammar != worker.KeyValueGrammar {
-			t.Fatalf("command %q sent without the grammar (%q)", m.Content, m.Grammar)
-		}
-	}
-	if cmds == 0 {
-		t.Fatal("no workflow command sent")
-	}
-}
-
-// TestP19MarkdownSendsNoGrammar — a Markdown (default) project gets no
-// grammar file and its requests carry no grammar.
-func TestP19MarkdownSendsNoGrammar(t *testing.T) {
-	r := p16NewRigWith(t, p16Options{statefile: true})
-	r.run(t, 3)
-	if _, err := os.Stat(filepath.Join(r.dir, service.GrammarFile)); !os.IsNotExist(err) {
-		t.Fatalf("%s written for a Markdown project: %v", service.GrammarFile, err)
-	}
-	msgs := r.g.Messages()
-	if len(msgs) == 0 {
-		t.Fatal("no request sent")
-	}
-	for _, m := range msgs {
-		if m.Grammar != "" {
-			t.Fatalf("Markdown request %q carries a grammar", m.Content)
-		}
 	}
 }

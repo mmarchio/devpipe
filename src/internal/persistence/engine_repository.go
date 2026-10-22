@@ -40,6 +40,13 @@ type PositionUpdate struct {
 	SessionID *uuid.UUID
 }
 
+// EventRef identifies one execution event: its position, time and payload.
+type EventRef struct {
+	Seq     int64
+	At      time.Time
+	Payload map[string]any
+}
+
 // StepRecord is one durable engine step (WBS 16.8, 16.83).
 type StepRecord struct {
 	ID                uuid.UUID
@@ -300,6 +307,13 @@ type EngineRepository interface {
 	// ReplanUnit replaces a unit's specification with its replanned one
 	// and drops its manual-criterion approvals (the criteria changed).
 	ReplanUnit(ctx context.Context, ex Executor, unitID uuid.UUID, spec *wbs.WorkUnitSpecification) error
+	// LastEvent returns the execution's newest event of type typ — when
+	// workUnitID is set, the newest whose payload names that unit — or
+	// nil.
+	LastEvent(ctx context.Context, ex Executor, executionID uuid.UUID, typ execution.EventType, workUnitID *uuid.UUID) (*EventRef, error)
+	// ClearUnitApprovals drops a unit's manual-criterion approvals (a
+	// requeued task is reviewed again).
+	ClearUnitApprovals(ctx context.Context, ex Executor, unitID uuid.UUID) error
 	// LastRecoveryResolved returns when the execution's latest recovery
 	// with the given reason was resolved (nil when never).
 	LastRecoveryResolved(ctx context.Context, ex Executor, executionID uuid.UUID, reason string) (*time.Time, error)

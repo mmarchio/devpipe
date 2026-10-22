@@ -187,6 +187,11 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 		t.check, t.status = s.replanCheck, "ACTIVE"
 		s.write(wbs.ActiveTaskFile, s.doc("Active task", "")+s.section(*t, false))
 		s.backlog()
+	case strings.HasPrefix(m.Content, "plan phase 2"):
+		// The backlog keeps phase 1's DONE tasks and appends phase 2's.
+		s.write(wbs.PlanFile, "# Plan — phase 2\n\nFrom the WBS.\n")
+		s.tasks = append(s.tasks, sfTask{key: "C", status: "TODO"}, sfTask{key: "D", deps: "C", status: "TODO"})
+		s.backlog()
 	case strings.HasPrefix(m.Content, "plan phase 1"):
 		s.planned++
 		_, rejErr := os.Stat(s.file(wbs.PlanRejectedFile))
@@ -225,6 +230,9 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 	case cmd == "have the project manager perform acceptance tasks":
 		s.accepted++
 		active, _ := os.ReadFile(s.file(wbs.ActiveTaskFile))
+		if d, err := wbs.ParseTasks(string(active)); err == nil && len(d.Tasks) == 0 {
+			active = nil // a file with no task (e.g. cleared by a requeue)
+		}
 		archive, _ := os.ReadFile(s.file(wbs.ArchiveFile))
 		for i := range s.tasks {
 			t := &s.tasks[i]
@@ -540,6 +548,51 @@ func TestP19StatefileWorkflowAdoptsPriorWork(t *testing.T) {
 	// A was marked DONE on a passing overseer validation of its own.
 	if n := r.count(t, "SELECT count(*) FROM work_units w JOIN validation_runs v ON v.id = w.done_validation_run_id WHERE w.unit_key = 'A' AND w.status = 'DONE' AND v.status = 'PASS' AND v.execution_id = '"+r.execID.String()+"'"); n != 1 {
 		t.Fatalf("task A adopted without its own passing validation (%d)", n)
+	}
+}
+
+// A phase is planned from its own tasks only: the backlog still holds the
+// earlier phase's DONE tasks, but they stay in that phase's plan and are
+// never carried into the next phase's plan.
+func TestP19StatefileWorkflowPlansOnlyThePhase(t *testing.T) {
+	r := p16NewRigWith(t, p16Options{statefile: true, phases: []p15Phase{{1, "Foundation", "PENDING", 1}, {2, "Second", "PENDING", 1}}})
+	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}}
+	r.g.Responder = team.respond
+	res, err := r.eng().Run(context.Background(), r.execID, 400)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, p16Trace(res))
+	}
+	cmds := team.commandLines()
+	want := strings.Join([]string{
+		"create the output-format skill",
+		"plan phase 1",
+		"have the project manager perform acceptance tasks",
+		"implement task A", "test task A",
+		"have the project manager perform acceptance tasks",
+		"implement task B", "test task B",
+		"have the project manager perform acceptance tasks",
+		"plan phase 2",
+		"have the project manager perform acceptance tasks",
+		"implement task C", "test task C",
+		"have the project manager perform acceptance tasks",
+		"implement task D", "test task D",
+		"have the project manager perform acceptance tasks",
+	}, " | ")
+	if cmds != want {
+		t.Fatalf("commands\n got %s\nwant %s\nrecovery: %q\ntrace: %s", cmds, want, r.recoveryReason(t), p16Trace(res))
+	}
+	if st := r.execStatus(t); st != string(execution.ExecutionCompleted) {
+		t.Fatalf("execution %s, recovery %q", st, r.recoveryReason(t))
+	}
+	for order, keys := range map[int]string{1: "A,B", 2: "C,D"} {
+		var got string
+		if err := r.h.DBScan(context.Background(), "SELECT COALESCE(string_agg(w.unit_key, ',' ORDER BY w.unit_key), '') FROM work_units w "+
+			"JOIN execution_plans p ON p.id = w.execution_plan_id WHERE p.phase_id = '"+r.phases[order].String()+"'", &got); err != nil {
+			t.Fatal(err)
+		}
+		if got != keys {
+			t.Fatalf("phase %d planned units %q, want %q", order, got, keys)
+		}
 	}
 }
 

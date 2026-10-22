@@ -632,8 +632,10 @@ func TestP1519Views(t *testing.T) {
 func TestP1520Events(t *testing.T) {
 	// 10 bootstrap types (Phase 15) + 33 engine types (P16-14) + 2
 	// repository types (P18-41: HEAD accepted, worker-run evidence) + the
-	// task replan.
-	if len(AllEventTypes()) != 46 {
+	// task replan + the task requeue (requested, applied) + the task
+	// analysis / fix (started, finished each) + the repeated action + pause
+	// after task (requested, cancelled, applied).
+	if len(AllEventTypes()) != 56 {
 		t.Fatalf("%d types", len(AllEventTypes()))
 	}
 	if _, err := ParseEventType("NOPE"); err == nil {

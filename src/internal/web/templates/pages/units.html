@@ -10,6 +10,6 @@
 <div class="field"><label for="u-val">Validation result</label><select id="u-val" name="validation"><option value="">Any</option>{{range $d.Validations}}<option value="{{.}}"{{if eq . $d.Validation}} selected{{end}}>{{.}}</option>{{end}}</select></div>
 <div class="field"><button type="submit">Filter</button></div>
 </form>
-<div data-fragment-url="/projects/{{$pid}}/fragments/units?phase={{$d.Phase.ID}}&amp;{{$d.Query}}">{{template "frag-units" $d.Units}}</div>
+<div data-fragment-url="{{$d.FragmentURL}}">{{template "frag-units" $d.Units}}</div>
 {{template "pager" (dict "Page" $d.Units.Page "Base" $d.PagerBase)}}
 {{end}}

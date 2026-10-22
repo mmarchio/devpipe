@@ -13,7 +13,7 @@ import (
 //
 //	GET  /v1/models            reachability / credential probe (handshake)
 //	POST /v1/chat/completions  every message send:
-//	                           {"model", "messages":[{"role","content"}], "stream":false[, "grammar"]}
+//	                           {"model", "messages":[{"role","content"}], "stream":false}
 //	                           (X-Request-ID, X-Overseer-Dispatch-Key, X-Overseer-Session-ID,
 //	                           X-Overseer-Metadata)
 //
@@ -50,9 +50,6 @@ type ChatRequest struct {
 	Model    string        `json:"model"`
 	Messages []ChatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
-	// Grammar is a GBNF grammar constraining the reply (omitted when
-	// empty).
-	Grammar string `json:"grammar,omitempty"`
 }
 
 // ChatUsage is the OpenAI token usage block.
@@ -152,7 +149,6 @@ type GatewayRequest struct {
 	RequestID string            `json:"request_id"`
 	Model     string            `json:"model,omitempty"`
 	Content   string            `json:"content"`
-	Grammar   string            `json:"grammar,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
@@ -246,7 +242,7 @@ func Translate(req worker.WorkerRequest, cfg worker.WorkerConfig) (GatewayReques
 	if req.Metadata.RuntimeStateID.String() != "00000000-0000-0000-0000-000000000000" {
 		md["runtime_state_id"] = req.Metadata.RuntimeStateID.String()
 	}
-	return GatewayRequest{RequestID: req.RequestID.String(), Model: cfg.Model, Content: req.Prompt.Content, Grammar: req.Grammar, Metadata: md}, nil
+	return GatewayRequest{RequestID: req.RequestID.String(), Model: cfg.Model, Content: req.Prompt.Content, Metadata: md}, nil
 }
 
 func usageFrom(u *GatewayUsage) worker.WorkerUsage {

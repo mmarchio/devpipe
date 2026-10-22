@@ -194,27 +194,63 @@ func (e *Engine) handleReplanCheck(ctx context.Context, st *engineState, step *p
 		return *stop, nil
 	}
 	key := wbs.UnitKey(st.unit)
-	t, problem := e.activeTask(st)
+	spec, changed, problem, err := e.replannedTask(ctx, st)
+	if err != nil {
+		return execution.StepResult{}, err
+	}
 	if problem != "" {
 		return e.statefileRetry(ctx, st, step, problem, refs)
+	}
+	if !changed {
+		return e.statefileRetry(ctx, st, step, "the replanned task "+key+" is unchanged: change what makes it fail under the overseer's validation", refs)
+	}
+	uid := st.unit.ID
+	tx := func(tx persistence.Transaction) error {
+		if err := e.d.Repo.ReplanUnit(ctx, tx, uid, spec); err != nil {
+			return err
+		}
+		err := e.d.Repo.SetUnitStatus(ctx, tx, uid, []wbs.WorkUnitStatus{wbs.WorkUnitStatusVALIDATING, wbs.WorkUnitStatusINCOMPLETE,
+			wbs.WorkUnitStatusEXECUTING}, wbs.WorkUnitStatusEXECUTING)
+		if err != nil && !errors.Is(err, persistence.ErrConflict) {
+			return err
+		}
+		return nil
+	}
+	ev := pendingEvent{Type: execution.EventUnitReplanned, Payload: map[string]any{"work_unit_id": uid.String(), "key": key,
+		"resets": []string{LimitFixAttempts, LimitStatefileResends, LimitIdenticalFailures}}}
+	refs.Detail = map[string]any{"replanned": key}
+	return e.advance(ctx, st, step, "REPLANNED", advanceOpts{Refs: refs, Outcome: "REPLANNED", SetUnit: true, UnitID: &uid, Tx: tx,
+		Events: []pendingEvent{ev}})
+}
+
+// replannedTask reads the current task as the team rewrote it: the same
+// section in BACKLOG.md and ACTIVE_TASK.md, the same key, kind and
+// dependencies, valid under the plan checks. It returns the parsed
+// definition and whether it differs from the stored one; problem is
+// non-empty when the files do not hold an acceptable rewrite.
+func (e *Engine) replannedTask(ctx context.Context, st *engineState) (*wbs.WorkUnitSpecification, bool, string, error) {
+	key := wbs.UnitKey(st.unit)
+	t, problem := e.activeTask(st)
+	if problem != "" {
+		return nil, false, problem, nil
 	}
 	backlog, problem := readTaskFile(st.cwd(), wbs.BacklogFile, false)
 	if problem != "" {
-		return e.statefileRetry(ctx, st, step, problem, refs)
+		return nil, false, problem, nil
 	}
 	bt := backlog.Find(key)
 	if bt == nil {
-		return e.statefileRetry(ctx, st, step, fmt.Sprintf("task %s is missing from %s", key, wbs.BacklogFile), refs)
+		return nil, false, fmt.Sprintf("task %s is missing from %s", key, wbs.BacklogFile), nil
 	}
 	a, _ := json.Marshal(t.Unit)
 	bb, _ := json.Marshal(bt.Unit)
 	if string(a) != string(bb) {
-		return e.statefileRetry(ctx, st, step, fmt.Sprintf("%s and %s must hold the same replanned task %s", wbs.BacklogFile, wbs.ActiveTaskFile, key), refs)
+		return nil, false, fmt.Sprintf("%s and %s must hold the same replanned task %s", wbs.BacklogFile, wbs.ActiveTaskFile, key), nil
 	}
 	u := t.Unit
 	deps, err := e.d.Repo.UnitDependencies(ctx, nil, st.plan.ID)
 	if err != nil {
-		return execution.StepResult{}, err
+		return nil, false, "", err
 	}
 	keyOf := map[uuid.UUID]string{}
 	var carried []string
@@ -232,8 +268,8 @@ func (e *Engine) handleReplanCheck(ctx context.Context, st *engineState, step *p
 	slices.Sort(stored)
 	slices.Sort(got)
 	if kind, _ := wbs.ParseWorkUnitKind(u.Kind); kind != st.unit.Kind || !slices.Equal(stored, got) {
-		return e.statefileRetry(ctx, st, step, fmt.Sprintf("a replanned task keeps its key, kind and dependencies: %s is %s and depends on %s",
-			key, st.unit.Kind, depList(stored)), refs)
+		return nil, false, fmt.Sprintf("a replanned task keeps its key, kind and dependencies: %s is %s and depends on %s",
+			key, st.unit.Kind, depList(stored)), nil
 	}
 	pc := &wbs.PlanCandidate{Units: []wbs.CandidateUnit{u}}
 	if problems := validateCandidate(pc, st.engine.AtomicPolicy, carried); len(problems) > 0 {
@@ -241,29 +277,11 @@ func (e *Engine) handleReplanCheck(ctx context.Context, st *engineState, step *p
 		for _, p := range problems {
 			msgs = append(msgs, p.Code+": "+p.Message)
 		}
-		return e.statefileRetry(ctx, st, step, "the replanned task "+key+" is invalid: "+strings.Join(msgs, "; "), refs)
+		return nil, false, "the replanned task " + key + " is invalid: " + strings.Join(msgs, "; "), nil
 	}
 	spec := wbs.PlannedUnitsFromCandidate(pc)[0].Spec
-	if st.unit.Specification != nil && sameSpec(*st.unit.Specification, spec) {
-		return e.statefileRetry(ctx, st, step, "the replanned task "+key+" is unchanged: change what makes it fail under the overseer's validation", refs)
-	}
-	uid := st.unit.ID
-	tx := func(tx persistence.Transaction) error {
-		if err := e.d.Repo.ReplanUnit(ctx, tx, uid, &spec); err != nil {
-			return err
-		}
-		err := e.d.Repo.SetUnitStatus(ctx, tx, uid, []wbs.WorkUnitStatus{wbs.WorkUnitStatusVALIDATING, wbs.WorkUnitStatusINCOMPLETE,
-			wbs.WorkUnitStatusEXECUTING}, wbs.WorkUnitStatusEXECUTING)
-		if err != nil && !errors.Is(err, persistence.ErrConflict) {
-			return err
-		}
-		return nil
-	}
-	ev := pendingEvent{Type: execution.EventUnitReplanned, Payload: map[string]any{"work_unit_id": uid.String(), "key": key,
-		"resets": []string{LimitFixAttempts, LimitStatefileResends, LimitIdenticalFailures}}}
-	refs.Detail = map[string]any{"replanned": key}
-	return e.advance(ctx, st, step, "REPLANNED", advanceOpts{Refs: refs, Outcome: "REPLANNED", SetUnit: true, UnitID: &uid, Tx: tx,
-		Events: []pendingEvent{ev}})
+	changed := st.unit.Specification == nil || !sameSpec(*st.unit.Specification, spec)
+	return &spec, changed, "", nil
 }
 
 func depList(keys []string) string {

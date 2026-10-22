@@ -44,24 +44,47 @@ const (
 	EventUnitDone             EventType = "WORK_UNIT_DONE"
 	// EventUnitReplanned: the architect replanned a task the overseer's
 	// validation failed the same way repeatedly.
-	EventUnitReplanned         EventType = "WORK_UNIT_REPLANNED"
-	EventPhaseValidationFailed EventType = "PHASE_VALIDATION_FAILED"
-	EventPhaseDone             EventType = "PHASE_DONE"
-	EventExecutionWaiting      EventType = "EXECUTION_WAITING"
-	EventExecutionPaused       EventType = "EXECUTION_PAUSED"
-	EventExecutionResumed      EventType = "EXECUTION_RESUMED"
-	EventExecutionCancelled    EventType = "EXECUTION_CANCELLED"
-	EventRecoveryRequired      EventType = "EXECUTION_RECOVERY_REQUIRED"
-	EventRecoveryResolved      EventType = "EXECUTION_RECOVERY_RESOLVED"
-	EventHardeningStarted      EventType = "HARDENING_STARTED"
-	EventHardeningAnalyzed     EventType = "HARDENING_ANALYZED"
-	EventHardeningOperation    EventType = "HARDENING_OPERATION"
-	EventHardeningGroupDone    EventType = "HARDENING_GROUP_CONSOLIDATED"
-	EventHardeningGroupSkipped EventType = "HARDENING_GROUP_SKIPPED"
-	EventHardeningCompleted    EventType = "HARDENING_COMPLETED"
-	EventFinalValidationPassed EventType = "FINAL_VALIDATION_PASSED"
-	EventFinalValidationFailed EventType = "FINAL_VALIDATION_FAILED"
-	EventProjectCompleted      EventType = "PROJECT_COMPLETED"
+	EventUnitReplanned EventType = "WORK_UNIT_REPLANNED"
+	// EventUnitRequeueRequested: an operator asked to restart the current
+	// task from the beginning; it applies at the next step boundary.
+	EventUnitRequeueRequested EventType = "WORK_UNIT_REQUEUE_REQUESTED"
+	// EventUnitRequeued: the task was restarted from the beginning (its
+	// progress, context and attempt counters cleared).
+	EventUnitRequeued EventType = "WORK_UNIT_REQUEUED"
+	// Task analysis and fix from the recovery screen: the ARCHITECT
+	// analyzes the task for optimizations that remove the recovery cause,
+	// then (on request) implements them.
+	EventUnitAnalysisStarted EventType = "WORK_UNIT_ANALYSIS_STARTED"
+	EventUnitAnalyzed        EventType = "WORK_UNIT_ANALYZED"
+	EventUnitFixStarted      EventType = "WORK_UNIT_FIX_STARTED"
+	EventUnitFixed           EventType = "WORK_UNIT_FIXED"
+	// EventUnitRepeatDetected: the worker was about to repeat one action
+	// on a task again; the overseer paused the execution to analyze, fix
+	// and requeue the task, then resume.
+	EventUnitRepeatDetected EventType = "WORK_UNIT_REPEAT_DETECTED"
+	// Pause after the current task: an operator asked to pause once the
+	// next task is loaded, before work on it begins; cancelled, or applied
+	// (the project paused).
+	EventPauseAfterTaskRequested EventType = "PAUSE_AFTER_TASK_REQUESTED"
+	EventPauseAfterTaskCancelled EventType = "PAUSE_AFTER_TASK_CANCELLED"
+	EventPauseAfterTaskApplied   EventType = "PAUSE_AFTER_TASK_APPLIED"
+	EventPhaseValidationFailed   EventType = "PHASE_VALIDATION_FAILED"
+	EventPhaseDone               EventType = "PHASE_DONE"
+	EventExecutionWaiting        EventType = "EXECUTION_WAITING"
+	EventExecutionPaused         EventType = "EXECUTION_PAUSED"
+	EventExecutionResumed        EventType = "EXECUTION_RESUMED"
+	EventExecutionCancelled      EventType = "EXECUTION_CANCELLED"
+	EventRecoveryRequired        EventType = "EXECUTION_RECOVERY_REQUIRED"
+	EventRecoveryResolved        EventType = "EXECUTION_RECOVERY_RESOLVED"
+	EventHardeningStarted        EventType = "HARDENING_STARTED"
+	EventHardeningAnalyzed       EventType = "HARDENING_ANALYZED"
+	EventHardeningOperation      EventType = "HARDENING_OPERATION"
+	EventHardeningGroupDone      EventType = "HARDENING_GROUP_CONSOLIDATED"
+	EventHardeningGroupSkipped   EventType = "HARDENING_GROUP_SKIPPED"
+	EventHardeningCompleted      EventType = "HARDENING_COMPLETED"
+	EventFinalValidationPassed   EventType = "FINAL_VALIDATION_PASSED"
+	EventFinalValidationFailed   EventType = "FINAL_VALIDATION_FAILED"
+	EventProjectCompleted        EventType = "PROJECT_COMPLETED"
 	// EventRepositoryHeadAccepted: an operator accepted an externally
 	// changed repository HEAD / branch (WBS 18.50 / 18.51).
 	EventRepositoryHeadAccepted EventType = "REPOSITORY_HEAD_ACCEPTED"
@@ -85,6 +108,10 @@ var allEvents = []EventType{
 	EventHardeningGroupDone, EventHardeningGroupSkipped, EventHardeningCompleted,
 	EventFinalValidationPassed, EventFinalValidationFailed, EventProjectCompleted,
 	EventRepositoryHeadAccepted, EventWorkerRunEvidence, EventUnitReplanned,
+	EventUnitRequeueRequested, EventUnitRequeued,
+	EventUnitAnalysisStarted, EventUnitAnalyzed, EventUnitFixStarted, EventUnitFixed,
+	EventUnitRepeatDetected,
+	EventPauseAfterTaskRequested, EventPauseAfterTaskCancelled, EventPauseAfterTaskApplied,
 }
 
 // AllEventTypes returns every type in declaration order.

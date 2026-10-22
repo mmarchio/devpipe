@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"overseer/internal/execution"
 	"overseer/internal/persistence"
@@ -239,12 +240,45 @@ func (r *EngineRepository) LastRecoveryResolved(ctx context.Context, ex persiste
 func (r *EngineRepository) LastLimitReset(ctx context.Context, ex persistence.Executor, executionID uuid.UUID, limit string) (*time.Time, error) {
 	var at *time.Time
 	err := r.ex(ex).QueryRow(ctx, `SELECT max(created_at) FROM execution_events WHERE execution_id = $1
-		AND ((type = $2 AND payload->>'limit' = $3) OR (type = $4 AND payload->'resets' ? $3))`,
-		executionID, string(execution.EventRecoveryResolved), limit, string(execution.EventUnitReplanned)).Scan(&at)
+		AND ((type = $2 AND payload->>'limit' = $3) OR (type IN ($4, $5, $6) AND payload->'resets' ? $3))`,
+		executionID, string(execution.EventRecoveryResolved), limit, string(execution.EventUnitReplanned), string(execution.EventUnitRequeued),
+		string(execution.EventUnitFixed)).Scan(&at)
 	if err != nil {
 		return nil, TranslateDBError("last limit reset", err)
 	}
 	return at, nil
+}
+
+// LastEvent returns the execution's newest event of type typ (naming
+// workUnitID in its payload when set), or nil.
+func (r *EngineRepository) LastEvent(ctx context.Context, ex persistence.Executor, executionID uuid.UUID, typ execution.EventType, workUnitID *uuid.UUID) (*persistence.EventRef, error) {
+	var unit *string
+	if workUnitID != nil {
+		s := workUnitID.String()
+		unit = &s
+	}
+	var ref persistence.EventRef
+	var raw []byte
+	err := r.ex(ex).QueryRow(ctx, `SELECT seq, created_at, payload FROM execution_events WHERE execution_id = $1 AND type = $2
+		AND ($3::text IS NULL OR payload->>'work_unit_id' = $3) ORDER BY seq DESC LIMIT 1`, executionID, string(typ), unit).Scan(&ref.Seq, &ref.At, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, TranslateDBError("last event", err)
+	}
+	if err := json.Unmarshal(raw, &ref.Payload); err != nil {
+		return nil, fmt.Errorf("dbrepo: last event payload: %w", err)
+	}
+	return &ref, nil
+}
+
+// ClearUnitApprovals drops a unit's manual-criterion approvals.
+func (r *EngineRepository) ClearUnitApprovals(ctx context.Context, ex persistence.Executor, unitID uuid.UUID) error {
+	if _, err := r.ex(ex).Exec(ctx, `DELETE FROM acceptance_approvals WHERE work_unit_id = $1`, unitID); err != nil {
+		return TranslateDBError("clear unit approvals", err)
+	}
+	return nil
 }
 
 // ReplanUnit replaces a unit's specification (objective, instructions,

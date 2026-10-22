@@ -5,6 +5,12 @@
 //	POST /api/v1/projects/{project}/executions/{execution}/pause             (WBS 16.72)
 //	POST /api/v1/projects/{project}/executions/{execution}/resume            (WBS 16.73)
 //	POST /api/v1/projects/{project}/executions/{execution}/cancel            (WBS 16.74)
+//	POST /api/v1/projects/{project}/executions/{execution}/requeue           restart the current task
+//	POST /api/v1/projects/{project}/executions/{execution}/pause-after-task  pause before the next task's work
+//	POST /api/v1/projects/{project}/executions/{execution}/pause-after-task/cancel
+//	GET  /api/v1/projects/{project}/executions/{execution}/task-ops          task analysis / fix panel
+//	POST /api/v1/projects/{project}/executions/{execution}/task-ops/analyze  analyze the task (recovery)
+//	POST /api/v1/projects/{project}/executions/{execution}/task-ops/fix      implement the analysis
 //	POST /api/v1/projects/{project}/executions/{execution}/recovery/resolve  (WBS 16.76)
 //	GET  /api/v1/projects/{project}/executions/{execution}/timeline          (WBS 16.81)
 //	GET  /api/v1/projects/{project}/executions/{execution}/steps
@@ -23,6 +29,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"overseer/internal/execution"
@@ -50,6 +57,12 @@ func RegisterEngineRoutes(r *Router, eng *service.Engine, lifecycle *service.Lif
 		{http.MethodPost, ex + "/pause", api.lifecycleOp("pause")},
 		{http.MethodPost, ex + "/resume", api.lifecycleOp("resume")},
 		{http.MethodPost, ex + "/cancel", api.lifecycleOp("cancel")},
+		{http.MethodPost, ex + "/requeue", api.requeue},
+		{http.MethodPost, ex + "/pause-after-task", api.pauseAfterTask(true)},
+		{http.MethodPost, ex + "/pause-after-task/cancel", api.pauseAfterTask(false)},
+		{http.MethodGet, ex + "/task-ops", api.taskOps},
+		{http.MethodPost, ex + "/task-ops/analyze", api.taskOp(service.TaskOpAnalyze)},
+		{http.MethodPost, ex + "/task-ops/fix", api.taskOp(service.TaskOpFix)},
 		{http.MethodPost, ex + "/recovery/resolve", api.resolve},
 		{http.MethodGet, ex + "/timeline", api.timeline},
 		{http.MethodGet, ex + "/steps", api.steps},
@@ -74,6 +87,8 @@ func engineError(err error) error {
 	switch {
 	case errors.Is(err, service.ErrExecutionBusy):
 		return NewConflictCode("execution_busy", "The execution is driven by another scheduler.")
+	case errors.Is(err, service.ErrTaskOpRunning):
+		return NewConflictCode("task_op_running", "A task analysis or fix is running; wait until it finishes.")
 	}
 	return executionError(err)
 }
@@ -184,6 +199,102 @@ func (a *engineAPI) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ToExecutionDTO(e))
+}
+
+// pauseAfterTask requests (on) or cancels a pause once the next task is
+// loaded, before work on it begins.
+func (a *engineAPI) pauseAfterTask(on bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ids, err := pathUUIDs(r, "project", "execution")
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		set := a.eng.CancelPauseAfterTask
+		if on {
+			set = a.eng.RequestPauseAfterTask
+		}
+		if err := set(r.Context(), ids[0], ids[1], "operator"); err != nil {
+			if errors.Is(err, service.ErrPauseAfterTaskUnavailable) {
+				WriteError(w, r, NewConflictCode("pause_after_task_unavailable", strings.TrimPrefix(err.Error(), service.ErrConflict.Error()+": ")))
+				return
+			}
+			WriteError(w, r, engineError(err))
+			return
+		}
+		pending, err := a.eng.PauseAfterTaskPending(r.Context(), ids[1])
+		if err != nil {
+			WriteError(w, r, engineError(err))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"pause_after_task": pending})
+	}
+}
+
+// requeue restarts the execution's current task from the beginning
+// (applied now when the execution is idle, else when the running step
+// finishes). The reason is the X-Overseer-Reason header.
+func (a *engineAPI) requeue(w http.ResponseWriter, r *http.Request) {
+	ids, err := pathUUIDs(r, "project", "execution")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	reason := strings.TrimSpace(r.Header.Get(ReasonHeader))
+	if reason == "" {
+		WriteError(w, r, NewValidationCode("reason_required", "Requeueing a task requires a reason ("+ReasonHeader+" header)."))
+		return
+	}
+	res, err := a.eng.Requeue(r.Context(), ids[0], ids[1], "operator", reason)
+	if err != nil {
+		if errors.Is(err, service.ErrNotRequeueable) {
+			WriteError(w, r, NewConflictCode("not_requeueable", strings.TrimPrefix(err.Error(), service.ErrConflict.Error()+": ")))
+			return
+		}
+		WriteError(w, r, engineError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// taskOps returns the recovery screen's task analysis / fix panel.
+func (a *engineAPI) taskOps(w http.ResponseWriter, r *http.Request) {
+	ids, err := pathUUIDs(r, "project", "execution")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	v, err := a.eng.TaskOps(r.Context(), ids[0], ids[1])
+	if err != nil {
+		WriteError(w, r, engineError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// taskOp starts a task analysis or fix (202: it runs in the background;
+// GET task-ops reports progress and outcome).
+func (a *engineAPI) taskOp(op string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ids, err := pathUUIDs(r, "project", "execution")
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		start := a.eng.AnalyzeTask
+		if op == service.TaskOpFix {
+			start = a.eng.FixTask
+		}
+		if err := start(r.Context(), ids[0], ids[1], "operator"); err != nil {
+			if errors.Is(err, service.ErrConflict) {
+				WriteError(w, r, NewConflictCode("task_op_unavailable", strings.TrimPrefix(err.Error(), service.ErrConflict.Error()+": ")))
+				return
+			}
+			WriteError(w, r, engineError(err))
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"started": op})
+	}
 }
 
 func (a *engineAPI) timeline(w http.ResponseWriter, r *http.Request) {

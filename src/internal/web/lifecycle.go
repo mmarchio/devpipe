@@ -75,6 +75,8 @@ func lifecycleServiceError(err error) error {
 		return NewConflictError("invalid lifecycle transition")
 	case errors.Is(err, service.ErrNotFound):
 		return NewNotFoundError("project")
+	case errors.Is(err, service.ErrTaskOpRunning):
+		return NewConflictCode("task_op_running", "A task analysis or fix is running; resume when it finishes.")
 	case errors.Is(err, service.ErrConflict):
 		return NewConflictError("project state conflict")
 	case errors.Is(err, service.ErrInfrastructure):

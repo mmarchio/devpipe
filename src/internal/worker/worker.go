@@ -54,10 +54,6 @@ type WorkerRequest struct {
 
 	Prompt compression.WorkerPrompt
 
-	// Grammar is an optional GBNF grammar constraining the reply (the
-	// project's response format); "" sends none.
-	Grammar string
-
 	Metadata WorkerRequestMetadata
 }
 

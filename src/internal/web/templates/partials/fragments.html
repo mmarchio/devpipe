@@ -50,8 +50,15 @@
 {{range .Actions}}
   {{if eq . "START"}}<a class="button" href="/projects/{{$id}}/start">Start Project…</a>{{end}}
   {{if eq . "PAUSE"}}{{template "control" (dict "Action" (print "/projects/" $id "/pause") "CSRF" $csrf "Label" "Pause" "Class" "secondary")}}{{end}}
+  {{if eq . "PAUSE_AFTER_TASK"}}{{template "control" (dict "Action" (print "/projects/" $id "/pause-after-task") "CSRF" $csrf "Label" "Pause after done" "Class" "secondary")}}{{end}}
+  {{if eq . "CANCEL_PAUSE_AFTER_TASK"}}{{template "control" (dict "Action" (print "/projects/" $id "/pause-after-task/cancel") "CSRF" $csrf "Label" "Cancel pause after done" "Class" "secondary")}}{{end}}
   {{if eq . "RESUME"}}{{template "control" (dict "Action" (print "/projects/" $id "/resume") "CSRF" $csrf "Label" "Resume")}}{{end}}
-  {{if eq . "CANCEL"}}<a class="button secondary" href="/projects/{{$id}}/cancel">Cancel…</a>{{end}}
+  {{if eq . "CANCEL"}}<a class="button secondary actions-end" href="/projects/{{$id}}/cancel">Cancel…</a>{{end}}
+  {{if eq . "REQUEUE"}}<a class="button secondary" href="/projects/{{$id}}/requeue">Requeue task…</a>{{end}}
   {{if eq . "RESOLVE_RECOVERY"}}{{with $.ExecutionID}}<a class="button" href="/projects/{{$id}}/executions/{{.}}/recovery">Recovery…</a>{{end}}{{end}}
 {{else}}<span class="muted">No control actions are available in the current state.</span>{{end}}
+{{$base := print "/projects/" $id "/executions/" .ExecutionID "/recovery"}}{{$ops := .TaskOps}}
+{{if .ExecutionID}}<form class="inline" method="post" action="{{$base}}/analyze">{{template "csrf" $csrf}}<input type="hidden" name="back" value="overview"><button type="submit" class="secondary" data-pending="Analyzing…"{{if or (not $ops.Available) $ops.Running}} disabled{{end}}>Analyze task</button></form>
+<form class="inline" method="post" action="{{$base}}/fix">{{template "csrf" $csrf}}<input type="hidden" name="back" value="overview"><button type="submit" class="secondary" data-pending="Fixing…"{{if not $ops.FixEnabled}} disabled{{end}}>Fix task</button></form>
+{{else}}<button type="button" class="secondary" disabled>Analyze task</button> <button type="button" class="secondary" disabled>Fix task</button>{{end}}
 </div>{{end}}{{end}}

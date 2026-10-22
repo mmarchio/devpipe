@@ -4,7 +4,8 @@
 <h1>Recovery</h1>
 {{with .Message}}<div class="banner" role="alert">{{.}}</div>{{end}}
 {{with $r.Condition}}<p>Condition: <strong>{{.}}</strong> · Classification: <strong>{{$r.Classification}}</strong> · Evidence <code>{{short $r.PlanHash}}</code></p>{{end}}
-<div data-fragment-url="/projects/{{$pid}}/fragments/recovery?execution={{$r.ExecutionID}}">{{template "frag-recovery" $r}}</div>
+<div data-fragment-url="/projects/{{$pid}}/fragments/recovery?execution={{$r.ExecutionID}}">{{template "frag-recovery" $r.Recovery}}</div>
+<div data-fragment-url="/projects/{{$pid}}/fragments/task-ops?execution={{$r.ExecutionID}}">{{template "frag-task-ops" $r.TaskOps}}</div>
 {{if $r.Required}}
 <section class="panel"><h2>Approved recovery actions</h2>
 <p class="muted">Only actions approved by the backend recovery rules are offered. There is no generic "retry worker": an unknown delivery is reconciled, never blindly resent.</p>

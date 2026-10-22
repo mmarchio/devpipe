@@ -32,6 +32,11 @@ type ConsoleDeps struct {
 	Recovery      *RecoveryActionService
 	Inspector     execution.RepositoryInspector
 	Settings      *SettingsService
+	// PauseAfterTask reports a requested pause after the current task
+	// (nil = never).
+	PauseAfterTask interface {
+		PauseAfterTaskPending(ctx context.Context, executionID uuid.UUID) (bool, error)
+	}
 }
 
 // changedPathser is the optional read-only change listing of the inspector.
@@ -95,6 +100,16 @@ var eventLabels = map[execution.EventType]string{
 	execution.EventPlanRejected:             "Plan candidate rejected",
 	execution.EventPlanAmended:              "Plan amended",
 	execution.EventUnitClaimed:              "Work unit started",
+	execution.EventUnitRequeueRequested:     "Task requeue requested",
+	execution.EventUnitRequeued:             "Task requeued",
+	execution.EventUnitAnalysisStarted:      "Task analysis started",
+	execution.EventUnitAnalyzed:             "Task analyzed",
+	execution.EventUnitFixStarted:           "Task fix started",
+	execution.EventUnitFixed:                "Task fix finished",
+	execution.EventUnitRepeatDetected:       "Worker repeated an action",
+	execution.EventPauseAfterTaskRequested:  "Pause after task requested",
+	execution.EventPauseAfterTaskCancelled:  "Pause after task cancelled",
+	execution.EventPauseAfterTaskApplied:    "Paused after task",
 	execution.EventDispatchIntent:           "Worker dispatch",
 	execution.EventValidationStarted:        "Validation started",
 	execution.EventValidationPassed:         "Validation PASS",
@@ -326,8 +341,16 @@ func (s *ConsoleReadService) Overview(ctx context.Context, projectID uuid.UUID) 
 		}
 	}
 	execStatus := execution.ExecutionStatus(x.ExecutionStatus)
+	statefile := content != nil && statefileMachine(content.StateMachine)
+	requeueable := o.CurrentTask != nil && statefile
+	pauseAfter := false
+	if x.ExecutionID != nil && statefile && s.d.PauseAfterTask != nil {
+		if pauseAfter, err = s.d.PauseAfterTask.PauseAfterTaskPending(ctx, *x.ExecutionID); err != nil {
+			return nil, mapRead(err)
+		}
+	}
 	for _, a := range execution.AllowedActions(execution.ControlFacts{ProjectStatus: x.Status, HasExecution: x.ExecutionID != nil,
-		ExecutionStatus: execStatus, ReadinessOK: true}) {
+		ExecutionStatus: execStatus, ReadinessOK: true, Requeueable: requeueable, Statefile: statefile, PauseAfterTask: pauseAfter}) {
 		o.Actions = append(o.Actions, string(a))
 	}
 	if o.Actions == nil {

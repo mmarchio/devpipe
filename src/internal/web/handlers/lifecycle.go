@@ -140,6 +140,31 @@ func (c *Console) lifecycle(op string) http.HandlerFunc {
 	}
 }
 
+// pauseAfterTask — POST /projects/{id}/pause-after-task[/cancel]: pause
+// once the next task is loaded, before work on it begins (or withdraw it).
+func (c *Console) pauseAfterTask(on bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ov, ok := c.overview(w, r)
+		if !ok {
+			return
+		}
+		if ov.Execution == nil {
+			c.htmlError(w, r, http.StatusConflict, "NO_EXECUTION", "The project has no execution.")
+			return
+		}
+		path, msg := "/pause-after-task", "Pause after task requested: the project pauses once the next task is loaded, before work on it begins."
+		if !on {
+			path, msg = "/pause-after-task/cancel", "Pause after task cancelled."
+		}
+		resp := c.d.API.Do(r, http.MethodPost, "/api/v1/projects/"+pid(r)+"/executions/"+ov.Execution.ID+path, nil, "")
+		if !resp.OK() {
+			c.apiError(w, r, resp)
+			return
+		}
+		redirect(w, r, "/projects/"+pid(r), msg)
+	}
+}
+
 // cancelPage — GET /projects/{id}/cancel: explicit confirmation (WBS 17.72).
 func (c *Console) cancelPage(w http.ResponseWriter, r *http.Request) {
 	ov, ok := c.overview(w, r)
@@ -162,6 +187,48 @@ func (c *Console) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, r, "/projects/"+pid(r), "Project cancelled.")
+}
+
+// requeuePage — GET /projects/{id}/requeue: confirmation for restarting
+// the current task from the beginning.
+func (c *Console) requeuePage(w http.ResponseWriter, r *http.Request) {
+	ov, ok := c.overview(w, r)
+	if !ok {
+		return
+	}
+	c.render(w, r, http.StatusOK, "requeue", viewmodels.Page{Shell: c.projectShell(r, "Requeue task", ov), Data: ov})
+}
+
+// requeue — POST /projects/{id}/requeue with confirmation + reason: the
+// current execution's task restarts from the beginning.
+func (c *Console) requeue(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil || !checked(r, "confirm") || strings.TrimSpace(r.PostFormValue("reason")) == "" {
+		c.htmlError(w, r, http.StatusBadRequest, "CONFIRMATION_REQUIRED", "Requeueing requires explicit confirmation and a reason.")
+		return
+	}
+	ov, ok := c.overview(w, r)
+	if !ok {
+		return
+	}
+	if ov.Execution == nil {
+		c.htmlError(w, r, http.StatusConflict, "NOT_REQUEUEABLE", "The project has no execution.")
+		return
+	}
+	var res struct {
+		Status string `json:"status"`
+		Task   string `json:"task"`
+	}
+	resp := c.d.API.Do(r, http.MethodPost, "/api/v1/projects/"+pid(r)+"/executions/"+ov.Execution.ID+"/requeue", nil, r.PostFormValue("reason"))
+	if !resp.OK() {
+		c.apiError(w, r, resp)
+		return
+	}
+	_ = resp.Decode(&res)
+	msg := "Task " + res.Task + " requeued: it restarts from the beginning."
+	if res.Status == "REQUESTED" {
+		msg = "Requeue of task " + res.Task + " requested: it restarts from the beginning once the running step finishes."
+	}
+	redirect(w, r, "/projects/"+pid(r), msg)
 }
 
 // markReady — POST /projects/{id}/ready: the Phase 3 readiness operation

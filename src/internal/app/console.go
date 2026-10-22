@@ -135,7 +135,7 @@ func (a *App) startConsole(router *web.Router, setSvc *service.SettingsService, 
 	recovery := service.NewRecoveryActionService(execRepo, a.engine, a.workerSvc).WithStore(dbrepo.NewRecoveryStore(pool)).WithOps(a.engine)
 	console := service.NewConsoleReadService(service.ConsoleDeps{
 		Web: webRepo, Execs: execRepo, Workers: a.workerSvc, Results: a.resultSvc, Continuations: a.contSvc,
-		Engine: a.engine, Recovery: recovery, Inspector: a.repoInspector(), Settings: setSvc,
+		Engine: a.engine, Recovery: recovery, Inspector: a.repoInspector(), Settings: setSvc, PauseAfterTask: a.engine,
 	})
 	a.feed = service.NewLiveEventFeed(webRepo, service.LiveFeedConfig{Interval: a.cfg.Web.FeedInterval, Buffer: a.cfg.Web.FeedBuffer})
 	planning := service.NewPlanningSettingsService(setSvc, a.engine)

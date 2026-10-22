@@ -188,7 +188,7 @@ func TestP17177Partials(t *testing.T) {
 	// Optional data absent: fragments render without panicking.
 	for name, data := range map[string]any{"frag-overview": &readmodel.Overview{}, "frag-current-task": (*readmodel.CurrentTask)(nil),
 		"frag-flows": []readmodel.Flow(nil), "frag-units": readmodel.UnitPage{}, "frag-timeline": readmodel.Timeline{},
-		"frag-recovery": readmodel.Recovery{}, "frag-actions": actionsData{}} {
+		"frag-recovery": readmodel.Recovery{}, "frag-actions": actionsData{}, "frag-task-ops": taskOpsData{}} {
 		b.Reset()
 		if err := c.rnd.Fragment(&b, name, data); err != nil {
 			t.Fatalf("%s: %v", name, err)

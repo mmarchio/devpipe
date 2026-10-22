@@ -25,11 +25,6 @@ import (
 // GuideFile is the generated workflow guide.
 const GuideFile = wbs.StatefilesDir + "/HERMES.md"
 
-// GrammarFile is the generated GBNF grammar of the key:value reply format,
-// written only for key:value projects. The same grammar is sent with every
-// request of such a project.
-const GrammarFile = wbs.StatefilesDir + "/RESPONSE_FORMAT.gbnf"
-
 // RoleFile is the generated file of a role.
 func RoleFile(key string) string { return wbs.StatefilesDir + "/" + key + ".md" }
 
@@ -43,9 +38,9 @@ func statefileMachine(m state.StateMachineSnapshot) bool {
 	return false
 }
 
-// writeTeamFiles writes the role files, HERMES.md and, for a key:value
-// project, the response grammar for a statefile workflow execution
-// (nothing for other workflows).
+// writeTeamFiles writes the role files and HERMES.md (in the project's
+// statefile format) for a statefile workflow execution (nothing for other
+// workflows).
 func (s *BootstrapService) writeTeamFiles(ctx context.Context, projectID uuid.UUID, content execution.ConfigurationContent) error {
 	if !statefileMachine(content.StateMachine) {
 		return nil
@@ -76,7 +71,7 @@ func (s *BootstrapService) writeTeamFiles(ctx context.Context, projectID uuid.UU
 	if err := writeStatefile(cwd, GuideFile, RenderHermesGuide(content.StateMachine, keys, commands, format)); err != nil {
 		return fmt.Errorf("write %s: %w", GuideFile, err)
 	}
-	return writeGrammarFile(cwd, format)
+	return nil
 }
 
 // responseFormat is the project's worker response format (Markdown when
@@ -90,21 +85,6 @@ func (s *BootstrapService) responseFormat(ctx context.Context, projectID uuid.UU
 		return "", err
 	}
 	return st.ResponseFormat.OrDefault(), nil
-}
-
-// writeGrammarFile writes GrammarFile when the project's replies are
-// key:value and removes a stale one otherwise.
-func writeGrammarFile(cwd string, format worker.ResponseFormat) error {
-	if g := format.Grammar(); g != "" {
-		if err := writeStatefile(cwd, GrammarFile, g); err != nil {
-			return fmt.Errorf("write %s: %w", GrammarFile, err)
-		}
-		return nil
-	}
-	if err := removeStatefile(cwd, GrammarFile); err != nil {
-		return fmt.Errorf("remove %s: %w", GrammarFile, err)
-	}
-	return nil
 }
 
 // stateCommands returns each command state's command as shown to the
@@ -342,8 +322,7 @@ func replyFormat(f worker.ResponseFormat) string {
 	case worker.FormatKeyValue:
 		return "Format every reply as `key: value` lines, one per line with no other text: a `summary:` line, then one `blocker:` line per blocker " +
 			"(`blocker: none` when there is no blocker). For example:\n\n" +
-			"```text\nsummary: Implemented the parser and its unit tests.\nblocker: none\n```\n\n" +
-			"The exact grammar is the GBNF file `" + GrammarFile + "`; the overseer sends it with every command, so a reply that does not match it cannot be produced.\n"
+			"```text\nsummary: Implemented the parser and its unit tests.\nblocker: none\n```\n"
 	}
 	return "Format every reply as Markdown: a short summary paragraph, then a `## Blockers` list (`- None` when there is no blocker). For example:\n\n" +
 		"```markdown\nImplemented the parser and its unit tests.\n\n## Blockers\n\n- None\n```\n"

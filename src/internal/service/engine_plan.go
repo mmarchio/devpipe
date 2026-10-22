@@ -155,7 +155,13 @@ func (e *Engine) backlogCandidate(ctx context.Context, st *engineState, dispatch
 		reject("MALFORMED_PLAN", wbs.BacklogFile+": "+err.Error())
 		return nil, nil
 	}
-	pc := doc.Candidate()
+	// The backlog keeps every phase's tasks: those planned for another
+	// phase are never this phase's work.
+	other, err := e.otherPhaseKeys(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+	pc := withoutOtherPhases(doc.Candidate(), other)
 	if mode == wbs.PlanKindAmendment {
 		pc = withoutCarried(pc, st.units)
 	}
@@ -163,6 +169,55 @@ func (e *Engine) backlogCandidate(ctx context.Context, st *engineState, dispatch
 		return nil, err
 	}
 	return pc, nil
+}
+
+// otherPhaseKeys returns the unit keys of every plan of the project's
+// phases other than the working phase.
+func (e *Engine) otherPhaseKeys(ctx context.Context, st *engineState) (map[string]bool, error) {
+	work := st.workPhase()
+	keys := map[string]bool{}
+	for _, p := range st.phases {
+		if p.ID == work.ID {
+			continue
+		}
+		plans, err := e.d.Repo.ListPhasePlans(ctx, nil, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, pl := range plans {
+			units, err := e.d.Repo.ListPlanUnits(ctx, nil, pl.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, u := range units {
+				keys[wbs.UnitKey(u)] = true
+			}
+		}
+	}
+	return keys, nil
+}
+
+// withoutOtherPhases drops the tasks whose keys belong to other phases'
+// plans, and the dependencies on them (satisfied in their own phase).
+func withoutOtherPhases(pc *wbs.PlanCandidate, other map[string]bool) *wbs.PlanCandidate {
+	if len(other) == 0 {
+		return pc
+	}
+	out := &wbs.PlanCandidate{Summary: pc.Summary}
+	for _, u := range pc.Units {
+		if other[u.Key] {
+			continue
+		}
+		var deps []string
+		for _, d := range u.DependsOn {
+			if !other[d] {
+				deps = append(deps, d)
+			}
+		}
+		u.DependsOn = deps
+		out.Units = append(out.Units, u)
+	}
+	return out
 }
 
 // withoutCarried drops the tasks whose keys belong to the current plan.

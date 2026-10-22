@@ -322,7 +322,7 @@ func (c *HTTPClient) send(ctx context.Context, sessionID string, req GatewayRequ
 		content = WithWorkingDirectory(*cwd, content)
 	}
 	user := ChatMessage{Role: "user", Content: content}
-	body := ChatRequest{Model: req.Model, Messages: append(msgs, user), Stream: false, Grammar: req.Grammar}
+	body := ChatRequest{Model: req.Model, Messages: append(msgs, user), Stream: false}
 	hdr := map[string]string{HeaderRequestID: req.RequestID, HeaderDispatchKey: key, HeaderSessionID: sessionID, HeaderHermesSessionID: sessionID}
 	if len(req.Metadata) > 0 {
 		md, _ := json.Marshal(req.Metadata)

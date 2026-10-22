@@ -136,6 +136,9 @@ type Engine struct {
 	// validations bounds simultaneous validation command runs (WBS 18.93;
 	// nil = unlimited).
 	validations chan struct{}
+	// taskOps holds the recovery-screen task analysis / fix running per
+	// execution (TaskOpAnalyze / TaskOpFix).
+	taskOps sync.Map
 }
 
 // Engine errors.
@@ -616,6 +619,19 @@ func (e *Engine) step(ctx context.Context, d *driver) (execution.StepResult, err
 	}
 	if st.project.Status != project.StatusRUNNING {
 		return execution.StepResult{Outcome: execution.StepNoop, Reason: "project is " + string(st.project.Status)}, nil
+	}
+	// A requested requeue applies at a step boundary (never while a step
+	// is pending): the running step finished before this one.
+	if st.last == nil || st.last.Status != execution.StepIntent {
+		if pending, err := e.pendingRequeue(ctx, st); err != nil {
+			return execution.StepResult{}, translate(err)
+		} else if pending {
+			from, key := st.cur.Key, wbs.UnitKey(st.unit)
+			if err := e.applyRequeue(ctx, st); err != nil {
+				return execution.StepResult{}, err
+			}
+			return execution.StepResult{Outcome: execution.StepProgressed, State: from, Reason: "task " + key + " requeued"}, nil
+		}
 	}
 	action := execution.ResolveAction(st.cur)
 	if st.curRec != nil && execution.IsCommandTemplate(st.curRec.PromptTemplate) {

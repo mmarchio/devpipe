@@ -489,7 +489,10 @@ type unitsData struct {
 	Kind        string
 	Readiness   string
 	Validation  string
-	Query       string
+	// FragmentURL is the live-refresh URL of the units table, filters and
+	// page included (built here: a query string interpolated into a
+	// template URL would be escaped as one value).
+	FragmentURL string
 	PagerBase   string
 }
 
@@ -509,6 +512,11 @@ func (c *Console) units(w http.ResponseWriter, r *http.Request) {
 	if !c.load(w, r, "/api/v1/projects/"+pid(r)+"/console/phases/"+url.PathEscape(r.PathValue("phase"))+"/work-units?"+q, &page) {
 		return
 	}
+	frag := url.Values{}
+	if fq, err := url.ParseQuery(q); err == nil {
+		frag = fq
+	}
+	frag.Set("phase", r.PathValue("phase"))
 	filters := qs(r, "status", "kind", "readiness", "validation")
 	base := "/projects/" + pid(r) + "/phases/" + url.PathEscape(r.PathValue("phase")) + "/work-units?" + filters
 	if filters != "" {
@@ -518,7 +526,7 @@ func (c *Console) units(w http.ResponseWriter, r *http.Request) {
 		Phase: *ph, Units: page, Statuses: []string{"PENDING", "READY", "EXECUTING", "INCOMPLETE", "VALIDATING", "DONE", "FAILED", "BLOCKED"},
 		Kinds: []string{"ATOMIC", "COMPOSITION", "INTEGRATION", "VALIDATION"}, Validations: []string{"RUNNING", "PASS", "FAIL", "INFRA_ERROR", "NOT_CONFIGURED", "ABANDONED"},
 		Status: r.URL.Query().Get("status"), Kind: r.URL.Query().Get("kind"), Readiness: r.URL.Query().Get("readiness"),
-		Validation: r.URL.Query().Get("validation"), Query: q, PagerBase: base}})
+		Validation: r.URL.Query().Get("validation"), FragmentURL: "/projects/" + pid(r) + "/fragments/units?" + frag.Encode(), PagerBase: base}})
 }
 
 // fragUnits — the units table region (live refresh).

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -102,6 +103,13 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 	if problem != "" {
 		cmd += "\n\nThe statefiles you wrote for this command were rejected: " + feedback(problem) +
 			". Fix them to the layout and rules in " + GuideFile + " and redo this command." + expectedFormat(format)
+	}
+	if key == "CMD_ACCEPTANCE" {
+		hint, err := e.requeueHint(ctx, st)
+		if err != nil {
+			return "", err
+		}
+		cmd += hint
 	}
 	if key == "CMD_REPLAN" {
 		rc, err := e.replanContext(ctx, st, format)
@@ -285,6 +293,12 @@ func (e *Engine) handleCommand(ctx context.Context, st *engineState, step *persi
 			if st.unit == nil {
 				return e.requireRecovery(ctx, st, step, "no active task", nil)
 			}
+			if stop, err := e.repeatedCommand(ctx, st, step); stop != nil || err != nil {
+				if err != nil {
+					return execution.StepResult{}, err
+				}
+				return *stop, nil
+			}
 			implements, stop, err := e.boundTaskCommand(ctx, st, step, tmpl)
 			if stop != nil || err != nil {
 				if err != nil {
@@ -293,6 +307,13 @@ func (e *Engine) handleCommand(ctx context.Context, st *engineState, step *persi
 				return *stop, nil
 			}
 			if tmpl == "CMD_IMPLEMENT" && implements == 0 {
+				// The next task is loaded: a requested pause applies now.
+				if stop, err := e.pauseBeforeTask(ctx, st, step); stop != nil || err != nil {
+					if err != nil {
+						return execution.StepResult{}, err
+					}
+					return *stop, nil
+				}
 				// A new task starts with a clear context.
 				if stop, err := e.freshSession(ctx, st, step); stop != nil || err != nil {
 					if err != nil {
@@ -359,11 +380,20 @@ func (e *Engine) boundTaskCommand(ctx context.Context, st *engineState, step *pe
 	if err != nil {
 		return 0, nil, err
 	}
+	// A requeued task starts over: sends before its last requeue do not
+	// count (its first send again clears the context).
+	var requeuedAt time.Time
+	if rq, err := e.d.Repo.LastEvent(ctx, nil, st.rec.ID, execution.EventUnitRequeued, &st.unit.ID); err != nil {
+		return 0, nil, err
+	} else if rq != nil {
+		requeuedAt = rq.At
+	}
 	// implements counts every send (a new task's first one clears the
 	// context); limited only those since the fix-attempt reset.
 	implements, limited, continues := 0, 0, 0
 	for _, s := range steps {
-		if s.ID == step.ID || s.Status != execution.StepApplied || s.Action != execution.ActionCommand || s.WorkUnitID == nil || *s.WorkUnitID != st.unit.ID {
+		if s.ID == step.ID || s.Status != execution.StepApplied || s.Action != execution.ActionCommand || s.WorkUnitID == nil || *s.WorkUnitID != st.unit.ID ||
+			!s.IntentAt.After(requeuedAt) {
 			continue
 		}
 		switch s.StateKey {
@@ -498,19 +528,6 @@ func writeStatefile(cwd, rel, content string) error {
 		return err
 	}
 	return os.Rename(tmp, abs)
-}
-
-// removeStatefile removes rel under the working directory (confined like
-// writeStatefile); a missing file is not an error.
-func removeStatefile(cwd, rel string) error {
-	abs, err := statefile.SafeRelPath(cwd, rel)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	return nil
 }
 
 // readPlanningDoc reads a statefile the team wrote under the working

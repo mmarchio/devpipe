@@ -22,6 +22,15 @@ type LifecycleService struct {
 	// hooks observe committed status changes (Phase 11: pause / cancel stop
 	// precompute jobs). Hooks never fail the transition.
 	hooks []func(ctx context.Context, projectID uuid.UUID, status project.ProjectStatus)
+	// resumeGuards can refuse a resume (the engine: a task analysis or
+	// fix is running).
+	resumeGuards []func(ctx context.Context, projectID uuid.UUID) error
+}
+
+// WithResumeGuard registers a check that can refuse Resume.
+func (s *LifecycleService) WithResumeGuard(fn func(ctx context.Context, projectID uuid.UUID) error) *LifecycleService {
+	s.resumeGuards = append(s.resumeGuards, fn)
+	return s
 }
 
 // WithStatusHook registers an observer of committed project status changes.
@@ -224,6 +233,11 @@ func (s *LifecycleService) Resume(ctx context.Context, projectID string) (*proje
 	}
 	if _, err := s.projects.Get(ctx, parsed.String()); err != nil {
 		return nil, translate(err)
+	}
+	for _, g := range s.resumeGuards {
+		if err := g(ctx, parsed); err != nil {
+			return nil, err
+		}
 	}
 	return s.TransitionGuarded(ctx, projectID, "resume", project.StatusRUNNING, func(p *project.Project) (bool, error) {
 		if p.Status != project.StatusPAUSED {

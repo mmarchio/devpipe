@@ -63,12 +63,10 @@ type Message struct {
 	// Content is the last (user) message without its leading
 	// "change working directory to <path>" line, Dir that path ("" when
 	// the prompt had none); Messages the full body list.
-	Content string
-	Dir     string
-	Model   string
-	Stream  bool
-	// Grammar is the request's GBNF grammar ("" when none was sent).
-	Grammar  string
+	Content  string
+	Dir      string
+	Model    string
+	Stream   bool
 	Messages []ChatMessage
 	// Metadata is the X-Overseer-Metadata header object.
 	Metadata map[string]string
@@ -392,7 +390,6 @@ func (g *Gateway) completion(w http.ResponseWriter, r *http.Request) {
 		Model    string        `json:"model"`
 		Messages []ChatMessage `json:"messages"`
 		Stream   bool          `json:"stream"`
-		Grammar  string        `json:"grammar"`
 	}
 	if err := json.Unmarshal(raw, &in); err != nil || len(in.Messages) == 0 {
 		writeErr(w, http.StatusBadRequest, "invalid_request", "messages required", 0)
@@ -432,7 +429,7 @@ func (g *Gateway) completion(w http.ResponseWriter, r *http.Request) {
 	}
 	if s != nil {
 		msg := Message{SessionID: id, RequestID: rid, DispatchKey: r.Header.Get("X-Overseer-Dispatch-Key"),
-			Auth: r.Header.Get("Authorization"), Content: last, Dir: dir, Model: in.Model, Stream: in.Stream, Grammar: in.Grammar, Messages: in.Messages, Metadata: md, At: time.Now()}
+			Auth: r.Header.Get("Authorization"), Content: last, Dir: dir, Model: in.Model, Stream: in.Stream, Messages: in.Messages, Metadata: md, At: time.Now()}
 		g.messages = append(g.messages, msg)
 		g.opLocked(id, "msg")
 		if !scripted && g.Responder != nil && !s.busy {

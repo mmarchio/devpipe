@@ -11,3 +11,27 @@
   <dt>Repository</dt><dd>{{with .RepositoryChanged}}{{if deref .}}Modified since the execution baseline{{else}}Unchanged since the execution baseline{{end}}{{else}}Unknown{{end}}</dd>
   <dt>Automatic execution</dt><dd>{{if .AutomaticStopped}}STOPPED{{else}}running{{end}}</dd>
 </dl></section>{{else}}<p class="muted">No recovery required (execution {{.ExecutionStatus}}).</p>{{end}}{{end}}{{end}}
+
+{{define "frag-task-ops"}}{{with .}}{{if .Ops.Available}}{{$base := print "/projects/" .ProjectID "/executions/" .ExecutionID "/recovery"}}
+<section class="panel" aria-labelledby="to-h"><h2 id="to-h">Task analysis — {{.Ops.Task}}</h2>
+{{template "task-ops-status" .Ops}}
+<div class="actions">
+<form method="post" action="{{$base}}/analyze">{{template "csrf" .CSRF}}<button type="submit" data-pending="Analyzing…"{{if .Ops.Running}} disabled{{end}}>Analyze task</button></form>
+<form method="post" action="{{$base}}/fix">{{template "csrf" .CSRF}}<button type="submit" data-pending="Fixing…"{{if not .Ops.FixEnabled}} disabled{{end}}>Fix task</button></form>
+</div></section>{{end}}{{end}}{{end}}
+
+{{/* The task analysis / fix progress and outcome (the recovery panel and the overview). */}}
+{{define "task-ops-status"}}{{with .Fix}}<div class="banner {{if .Success}}ok{{else}}warn{{end}}" role="status"><strong>{{if .Success}}Fix succeeded{{else}}Fix failed{{end}}</strong>
+{{.Message}} <span class="muted">({{fmtTime .At}})</span></div>{{end}}
+{{if .Running}}<div class="banner info" role="status"><strong>{{if eq .Running "ANALYZE"}}Analyzing task {{.Task}}…{{else}}Fixing task {{.Task}}…{{end}}</strong>
+The architect is working on it; this panel updates when it finishes. Resume and recovery actions wait until then.</div>{{end}}
+{{with .Interrupted}}<p class="muted">The last {{if eq . "ANALYZE"}}analysis{{else}}fix{{end}} was interrupted before it finished (the overseer stopped); run it again.</p>{{end}}
+<p class="muted">The architect analyzes the task in ACTIVE_TASK.md, what PLAN.md and the phase WBS say about it, and its tests and validation, looking for optimizations that remove the recovery reason (or keep a paused task from failing). Fix task implements them (task definition, tests or code); a changed definition is adopted only if it keeps the task's key, kind and dependencies. The execution stays paused or in recovery until you resume it.</p>
+{{with .Analysis}}<h3>Latest analysis <span class="muted">({{fmtTime .At}})</span></h3>
+{{if .Error}}<p>{{template "badge" "FAILED"}} {{.Error}}</p>{{else}}<p>{{if .Fixable}}{{template "badge" "PASS"}} Optimizations found{{else}}{{template "badge" "BLOCKED"}} No optimization that fixes the recovery reason was found{{end}}</p>
+{{with .Findings}}<h4>Findings</h4><ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{with .Optimizations}}<h4>Optimizations</h4><ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}{{end}}{{end}}{{end}}
+
+{{/* frag-task-ops-overview: the overview's task analysis / fix status, while there is any to show. */}}
+{{define "frag-task-ops-overview"}}{{with .}}{{if and .Ops.Available (or .Ops.Running .Ops.Interrupted .Ops.Analysis .Ops.Fix)}}<section class="panel" aria-labelledby="tov-h"><h2 id="tov-h">Task analysis — {{.Ops.Task}}</h2>
+{{template "task-ops-status" .Ops}}</section>{{end}}{{end}}{{end}}
