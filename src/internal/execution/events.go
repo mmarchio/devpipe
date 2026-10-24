@@ -68,23 +68,35 @@ const (
 	EventPauseAfterTaskRequested EventType = "PAUSE_AFTER_TASK_REQUESTED"
 	EventPauseAfterTaskCancelled EventType = "PAUSE_AFTER_TASK_CANCELLED"
 	EventPauseAfterTaskApplied   EventType = "PAUSE_AFTER_TASK_APPLIED"
-	EventPhaseValidationFailed   EventType = "PHASE_VALIDATION_FAILED"
-	EventPhaseDone               EventType = "PHASE_DONE"
-	EventExecutionWaiting        EventType = "EXECUTION_WAITING"
-	EventExecutionPaused         EventType = "EXECUTION_PAUSED"
-	EventExecutionResumed        EventType = "EXECUTION_RESUMED"
-	EventExecutionCancelled      EventType = "EXECUTION_CANCELLED"
-	EventRecoveryRequired        EventType = "EXECUTION_RECOVERY_REQUIRED"
-	EventRecoveryResolved        EventType = "EXECUTION_RECOVERY_RESOLVED"
-	EventHardeningStarted        EventType = "HARDENING_STARTED"
-	EventHardeningAnalyzed       EventType = "HARDENING_ANALYZED"
-	EventHardeningOperation      EventType = "HARDENING_OPERATION"
-	EventHardeningGroupDone      EventType = "HARDENING_GROUP_CONSOLIDATED"
-	EventHardeningGroupSkipped   EventType = "HARDENING_GROUP_SKIPPED"
-	EventHardeningCompleted      EventType = "HARDENING_COMPLETED"
-	EventFinalValidationPassed   EventType = "FINAL_VALIDATION_PASSED"
-	EventFinalValidationFailed   EventType = "FINAL_VALIDATION_FAILED"
-	EventProjectCompleted        EventType = "PROJECT_COMPLETED"
+	// Overseer MCP server (Phase 19): the team's structured progress,
+	// blockers, results and requests, a dispatch that ended without a
+	// result, and the project's cutover to database state authority (a
+	// retired operation; the type is kept for the events already recorded).
+	EventMCPProgress            EventType = "MCP_PROGRESS"
+	EventMCPBlocker             EventType = "MCP_BLOCKER"
+	EventMCPResult              EventType = "MCP_RESULT"
+	EventMCPTransitionRequested EventType = "MCP_TRANSITION_REQUESTED"
+	EventMCPRetryRequested      EventType = "MCP_RETRY_REQUESTED"
+	EventMCPContextResetRequest EventType = "MCP_CONTEXT_RESET_REQUESTED"
+	EventMCPResultMissing       EventType = "MCP_RESULT_MISSING"
+	EventStateAuthorityCutover  EventType = "STATE_AUTHORITY_CUTOVER"
+	EventPhaseValidationFailed  EventType = "PHASE_VALIDATION_FAILED"
+	EventPhaseDone              EventType = "PHASE_DONE"
+	EventExecutionWaiting       EventType = "EXECUTION_WAITING"
+	EventExecutionPaused        EventType = "EXECUTION_PAUSED"
+	EventExecutionResumed       EventType = "EXECUTION_RESUMED"
+	EventExecutionCancelled     EventType = "EXECUTION_CANCELLED"
+	EventRecoveryRequired       EventType = "EXECUTION_RECOVERY_REQUIRED"
+	EventRecoveryResolved       EventType = "EXECUTION_RECOVERY_RESOLVED"
+	EventHardeningStarted       EventType = "HARDENING_STARTED"
+	EventHardeningAnalyzed      EventType = "HARDENING_ANALYZED"
+	EventHardeningOperation     EventType = "HARDENING_OPERATION"
+	EventHardeningGroupDone     EventType = "HARDENING_GROUP_CONSOLIDATED"
+	EventHardeningGroupSkipped  EventType = "HARDENING_GROUP_SKIPPED"
+	EventHardeningCompleted     EventType = "HARDENING_COMPLETED"
+	EventFinalValidationPassed  EventType = "FINAL_VALIDATION_PASSED"
+	EventFinalValidationFailed  EventType = "FINAL_VALIDATION_FAILED"
+	EventProjectCompleted       EventType = "PROJECT_COMPLETED"
 	// EventRepositoryHeadAccepted: an operator accepted an externally
 	// changed repository HEAD / branch (WBS 18.50 / 18.51).
 	EventRepositoryHeadAccepted EventType = "REPOSITORY_HEAD_ACCEPTED"
@@ -112,6 +124,8 @@ var allEvents = []EventType{
 	EventUnitAnalysisStarted, EventUnitAnalyzed, EventUnitFixStarted, EventUnitFixed,
 	EventUnitRepeatDetected,
 	EventPauseAfterTaskRequested, EventPauseAfterTaskCancelled, EventPauseAfterTaskApplied,
+	EventMCPProgress, EventMCPBlocker, EventMCPResult, EventMCPTransitionRequested, EventMCPRetryRequested,
+	EventMCPContextResetRequest, EventMCPResultMissing, EventStateAuthorityCutover,
 }
 
 // AllEventTypes returns every type in declaration order.

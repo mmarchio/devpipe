@@ -134,6 +134,8 @@ type ProjectOverviewRow struct {
 	UnitStatus    string
 	UnitKind      string
 	UnitStartedAt *time.Time
+	// UnitCompletedAt is set once the unit is DONE.
+	UnitCompletedAt *time.Time
 
 	StateKey     string
 	StateName    string

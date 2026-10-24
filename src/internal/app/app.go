@@ -19,6 +19,7 @@ import (
 	"overseer/internal/faults"
 	"overseer/internal/gateway/hermes"
 	"overseer/internal/logging"
+	"overseer/internal/mcp"
 	"overseer/internal/orchestration"
 	"overseer/internal/precompute"
 	"overseer/internal/service"
@@ -102,6 +103,8 @@ type App struct {
 	resultSvc      *service.ResultService
 	contSvc        *service.ContinuationService
 	engine         *service.Engine
+	mcpSrv         *mcp.Server
+	outbox         *service.OutboxDispatcher
 	lifecycleSvc   *service.LifecycleService
 	bootstrapSvc   *service.BootstrapService
 
@@ -133,6 +136,10 @@ func (a *App) Continuations() *service.ContinuationService { return a.contSvc }
 
 // Lifecycle returns the project lifecycle service; nil before Start.
 func (a *App) Lifecycle() *service.LifecycleService { return a.lifecycleSvc }
+
+// MCPServer returns the overseer MCP server (Phase 19); nil when disabled
+// or before Start.
+func (a *App) MCPServer() *mcp.Server { return a.mcpSrv }
 
 // Engine returns the Phase 16 execution engine; nil before Start.
 func (a *App) Engine() *service.Engine { return a.engine }
@@ -1067,6 +1074,14 @@ func (a *App) Shutdown(ctx context.Context) error {
 		err = a.srv.Stop(sctx) // stops accepting, drains in-flight
 		a.srv = nil
 	}
+	if a.mcpSrv != nil {
+		_ = a.mcpSrv.Shutdown(sctx) // in-flight tool calls finish
+		a.mcpSrv = nil
+	}
+	if a.outbox != nil {
+		a.outbox.Stop()
+		a.outbox = nil
+	}
 	// 6. the continuation runner and the worker transport drain, so final
 	//    dispatch statuses persist (WBS 14.62 / 12.67);
 	if a.contSvc != nil {
@@ -1097,6 +1112,14 @@ func (a *App) Stop(ctx context.Context) error {
 	if a.srv != nil {
 		err = a.srv.Stop(ctx)
 		a.srv = nil
+	}
+	if a.mcpSrv != nil {
+		_ = a.mcpSrv.Shutdown(ctx)
+		a.mcpSrv = nil
+	}
+	if a.outbox != nil {
+		a.outbox.Stop()
+		a.outbox = nil
 	}
 	if a.contSvc != nil {
 		a.contSvc.Shutdown(ctx)
@@ -1141,6 +1164,7 @@ func (a *App) startBootstrap(ctx context.Context, router *web.Router, lifecycleS
 		Build:           service.BuildInfo{AppVersion: Version, SchemaVersion: a.schemaVersion, ConfigHash: a.configSnapshot.Hash},
 		Pool:            pool,
 		Repo:            dbrepo.NewExecutionRepository(pool),
+		MCPEnabled:      a.cfg.MCP.Enabled,
 		Projects:        dbrepo.NewProjectRepository(pool),
 		ProjectSettings: dbrepo.NewSettingsRepository(pool),
 		Phases:          dbrepo.NewPhaseRepository(pool),
@@ -1240,6 +1264,8 @@ func (a *App) startEngine(ctx context.Context, router *web.Router, lifecycleSvc 
 		ContextSnaps:    snapSvc,
 		Cache:           a.promptCacheSvc,
 		Worker:          a.workerSvc,
+		MCP:             dbrepo.NewMCPRepository(pool),
+		MCPTokenTTL:     a.cfg.MCP.Effective().TokenTTL,
 		Results:         a.resultSvc,
 		Continuations:   a.contSvc,
 		ActiveTask: service.NewActiveTaskService(stateFileSvc, dbrepo.NewPhaseRepository(pool),
@@ -1288,6 +1314,18 @@ func (a *App) startEngine(ctx context.Context, router *web.Router, lifecycleSvc 
 		return fmt.Errorf("app: %w", err)
 	}
 	a.verifyAuditInBackground()
+	if a.cfg.MCP.Enabled {
+		a.mcpSrv = mcp.New(a.cfg.MCP, a.engine.MCP(), a.lg.WithComponent("mcp").Logger, nil)
+		if err := a.mcpSrv.Start(ctx); err != nil {
+			return fmt.Errorf("app: mcp server: %w", err)
+		}
+		// The outbox's first run recovers the actions a crashed instance
+		// left behind.
+		a.outbox = service.NewOutboxDispatcher(dbrepo.NewMCPRepository(pool), a.engine, a.workerSvc.Owner(), a.lg.WithComponent("outbox").Logger)
+		if err := a.outbox.Start(2 * time.Second); err != nil {
+			return fmt.Errorf("app: outbox: %w", err)
+		}
+	}
 	if !a.cfg.Engine.SchedulerDisabled {
 		start := func() { a.engine.Start(a.cfg.Engine.Interval, a.cfg.Engine.Workers) }
 		if held {

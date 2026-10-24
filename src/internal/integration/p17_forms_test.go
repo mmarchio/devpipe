@@ -23,7 +23,8 @@ func hidden(body, name string) string {
 // preserved and escaped, then a configured project → phases → WBS →
 // readiness READY without database manipulation.
 func TestP17131ProjectCreationThroughWeb(t *testing.T) {
-	r := p17NewRig(t)
+	// A new project gets the statefile workflow, which needs the MCP server.
+	r := p17NewRigWith(t, p16Options{config: p19mcpConfig(t)})
 	b := r.b
 	body := b.mustPage("/projects/new")
 	if !strings.Contains(body, `<label for="name">Name</label>`) || !strings.Contains(body, `name="worker_provider"`) {

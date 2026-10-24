@@ -7,29 +7,10 @@ import (
 	"strings"
 )
 
-// State files. The team works in <working directory>/statefiles: the
-// overseer loads each phase's WBS into statefiles/wbs, the ARCHITECT
-// writes the phase plan to PLAN.md, the PLANNER breaks it into tasks in
-// BACKLOG.md, the PROJECT_MANAGER moves the active task into
-// ACTIVE_TASK.md (and finished tasks into TASK_ARCHIVE.md), the ENGINEER
-// implements and the TESTER tests the active task. The overseer reads the
-// files back to decide every transition.
-const (
-	StatefilesDir  = "statefiles"
-	WBSDir         = "statefiles/wbs"
-	PlanFile       = "statefiles/PLAN.md"
-	BacklogFile    = "statefiles/BACKLOG.md"
-	ActiveTaskFile = "statefiles/ACTIVE_TASK.md"
-	ArchiveFile    = "statefiles/TASK_ARCHIVE.md"
-	// PlanRejectedFile lists the problems of the last rejected plan; it
-	// exists only until a plan is accepted.
-	PlanRejectedFile = "statefiles/PLAN_REJECTED.md"
-)
-
-// WBSFile is the repository-relative file a phase's WBS is loaded into.
-func WBSFile(phaseOrder int) string {
-	return fmt.Sprintf("%s/phase-%02d.md", WBSDir, phaseOrder)
-}
+// StatefilesDir is the working-directory folder holding the generated
+// team files (HERMES.md, one file per role). The workflow state itself
+// lives in the database; nothing in this folder decides a transition.
+const StatefilesDir = "statefiles"
 
 // Task statuses in the task files. Any other value is "not yet complete".
 const (

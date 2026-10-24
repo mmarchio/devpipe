@@ -46,7 +46,7 @@ func TestT18210RunbookCoversRecovery(t *testing.T) {
 	}
 	for _, h := range []string{"## Startup", "## Shutdown", "## Upgrade", "## Backup", "## Restore", "## Point-in-time recovery",
 		"## Worker outage", "## Database outage", "## Disk full", "## DELIVERY_UNKNOWN", "## Repository mismatch",
-		"## Checkpoint recovery", "## Audit verification failure"} {
+		"## Checkpoint recovery", "## Audit verification failure", "## MCP server"} {
 		if !strings.Contains(doc, h) {
 			t.Errorf("runbook lacks %q", h)
 		}

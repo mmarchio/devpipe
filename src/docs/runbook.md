@@ -76,6 +76,16 @@ An INVALID or INCOMPLETE audit-chain verification is treated as a security incid
 2. Investigate how the audit rows changed (database access logs, restores, manual edits).
 3. When the cause is understood, acknowledge that exact failure: `POST /api/v1/audit/verify/acknowledge` with `{"reason": "…", "fingerprint": "<from the report>"}`. The acknowledgement is itself audited; a different later failure needs its own acknowledgement.
 
+## MCP server
+
+The overseer MCP server (Phase 19) is how Hermes reads its working context and submits every result of the statefile workflow; no statefile is read or written (docs/state-authority.md). It is off by default; bootstrap readiness refuses to start a statefile-workflow execution without it ("MCP server" check, `CONFIG_INVALID`).
+
+1. Choose a bearer token and export it to the overseer (for example `OVERSEER_MCP_KEY`). Set `mcp.enabled: true`, `mcp.addr` (for example `0.0.0.0:9142` on the devpipe network; never expose it beyond the Hermes container) and `mcp.auth_secret_env: OVERSEER_MCP_KEY`, then restart. `GET /healthz` on the MCP port answers without the token.
+2. In the Hermes `config.yaml`, add the server under `mcp_servers`: `url: http://<overseer container>:9142/mcp` with `headers: {Authorization: "Bearer <token>"}`. Restart Hermes; its banner lists the overseer tools.
+3. Each command carries a capability token that only works while that command's dispatch is in flight. A result that is missing when the reply arrives (`MCP_RESULT_MISSING`) gets the command resent with the problem, up to the resend limit, then recovery.
+
+Follow-up actions (blocker notifications, context resets) are committed to `workflow_outbox` with the request that caused them. The dispatcher retries them with backoff and marks them `DEAD` after the last attempt. A `DEAD` row is logged at error level; inspect its `last_error`.
+
 ## Recovery conditions
 
 ### `ARTIFACT_CORRUPT`
@@ -128,7 +138,7 @@ A task has `[MANUAL]` acceptance criteria that need a human. Verify them and `AP
 
 ### `MANUAL_REVIEW`
 
-A limit was exhausted (fix attempts, planning attempts, resends of a malformed statefile) or the engine needs a decision. Read the reason, the last command and the reply on the recovery page, fix the cause (often the statefiles or the task), then `MANUAL_RESUME`.
+A limit was exhausted (fix attempts, planning attempts, resends of a missing or malformed result) or the engine needs a decision. Read the reason, the last command and the reply on the recovery page, fix the cause (often the task or the team's MCP connection), then `MANUAL_RESUME`.
 
 ### `ORPHAN_PRECOMPUTE`
 
@@ -144,7 +154,7 @@ A required checkpoint did not finish (e.g. the git lock was held). Retried autom
 
 ### `PROMPT_TOO_LARGE`
 
-The prompt does not fit the worker's context window, even after compression. Reduce the inputs (WBS, statefiles, role instructions) or raise the context window, then `MANUAL_RESUME`.
+The prompt does not fit the worker's context window, even after compression. Reduce the inputs (WBS, role instructions) or raise the context window, then `MANUAL_RESUME`.
 
 ### `PROTOCOL_VIOLATION`
 

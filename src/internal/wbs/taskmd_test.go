@@ -124,9 +124,3 @@ func TestParseTasksStatusAndChecks(t *testing.T) {
 		t.Fatalf("empty backlog accepted: %v", err)
 	}
 }
-
-func TestStatefilePaths(t *testing.T) {
-	if WBSFile(3) != "statefiles/wbs/phase-03.md" || BacklogFile != "statefiles/BACKLOG.md" || ActiveTaskFile != "statefiles/ACTIVE_TASK.md" {
-		t.Fatal("paths")
-	}
-}

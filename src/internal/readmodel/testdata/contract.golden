@@ -159,11 +159,13 @@ Overview.current_task.stage string
 Overview.current_task.started_at time
 Overview.current_task.status string
 Overview.current_task.unit_id string
+Overview.current_unit.completed_at time
 Overview.current_unit.id string
 Overview.current_unit.key string
 Overview.current_unit.kind string
 Overview.current_unit.name string
 Overview.current_unit.stage string
+Overview.current_unit.started_at time
 Overview.current_unit.status string
 Overview.deletable bool
 Overview.description string
@@ -326,11 +328,13 @@ ProviderInfo.secret_ref string
 Recovery.actions[].high_impact bool
 Recovery.actions[].kind string
 Recovery.actions[].label string
+Recovery.affected_unit.completed_at time
 Recovery.affected_unit.id string
 Recovery.affected_unit.key string
 Recovery.affected_unit.kind string
 Recovery.affected_unit.name string
 Recovery.affected_unit.stage string
+Recovery.affected_unit.started_at time
 Recovery.affected_unit.status string
 Recovery.automatic_execution_stopped bool
 Recovery.classification string

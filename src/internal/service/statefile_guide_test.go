@@ -6,7 +6,6 @@ import (
 
 	"overseer/internal/role"
 	"overseer/internal/state"
-	"overseer/internal/worker"
 )
 
 func TestRenderRoleFile(t *testing.T) {
@@ -25,15 +24,20 @@ func TestRenderRoleFile(t *testing.T) {
 	}
 }
 
-func TestRenderHermesGuide(t *testing.T) {
+func TestRenderMCPGuide(t *testing.T) {
 	m := state.StateMachineSnapshot{States: []state.StateSnapshot{{Key: "PLAN", Roles: []string{"ARCHITECT", "PLANNER"}},
 		{Key: "TEST", Roles: []string{"TESTER"}}}}
-	got := RenderHermesGuide(m, []string{"ARCHITECT", "PLANNER", "TESTER"}, map[string]string{"PLAN": "plan phase <N>", "TEST": "verify <KEY>"}, worker.FormatMarkdown)
+	got := RenderMCPGuide(m, []string{"ARCHITECT", "PLANNER", "TESTER"}, map[string]string{"PLAN": "plan phase <N>", "TEST": "verify <KEY>"})
 	for _, want := range []string{"`statefiles/ARCHITECT.md`, `statefiles/PLANNER.md`, `statefiles/TESTER.md`",
-		"| `plan phase <N>` | ARCHITECT, then PLANNER |", "| `verify <KEY>` | TESTER |", "## How the overseer decides", "## Return format",
-		"never parsed", "Status: TODO | ACTIVE | COMPLETE | DONE", "- [ ] [MANUAL] <criterion>"} {
+		"| `plan phase <N>` | ARCHITECT, then PLANNER |", "| `verify <KEY>` | TESTER |", "## MCP tools", "submit_result",
+		"Do not read or write files under `statefiles/` to record workflow state."} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"BACKLOG.md", "ACTIVE_TASK.md", "TASK_ARCHIVE.md", "PLAN_REJECTED.md"} {
+		if strings.Contains(got, gone) {
+			t.Fatalf("the guide still names %s:\n%s", gone, got)
 		}
 	}
 }

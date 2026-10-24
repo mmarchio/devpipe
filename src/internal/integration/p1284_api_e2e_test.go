@@ -220,7 +220,7 @@ func TestP1299SessionReset(t *testing.T) {
 	if r.session(t, s1.ID).Status != worker.SessionReset || r.session(t, s2.ID).Status != worker.SessionActive || res.Dispatch.SessionID != s2.ID {
 		t.Fatal("S1 RESET / S2 ACTIVE")
 	}
-	if msgs := r.g.MessagesFor(s2.ProviderSessionID); len(msgs) != 1 || msgs[0].Messages[0].Content != hermes.ChangeDirectoryPrompt("/repos/project-a") {
+	if msgs := r.g.MessagesFor(s2.ProviderSessionID); len(msgs) != 1 || msgs[0].Messages[0].Content != hermes.ChangeDirectoryOnlyPrompt("/repos/project-a") {
 		t.Fatalf("reconstruction prompt without the cd: %+v (paths %v)", msgs, r.g.Paths()[pathsAfterNew:])
 	}
 	if hist, _ := r.ws().Sessions(ctx, r.pos.ProjectID); len(hist) != 2 {

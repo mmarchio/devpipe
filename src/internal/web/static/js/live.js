@@ -98,5 +98,18 @@
     });
   }
 
+  // Elapsed timers (hh:mm:ss) tick locally between fragment refreshes; a
+  // stopped timer (data-elapsed-until) keeps its server-rendered value.
+  function pad(n) { return n < 10 ? "0" + n : String(n); }
+  setInterval(function () {
+    var els = document.querySelectorAll("[data-elapsed-since]:not([data-elapsed-until])");
+    for (var i = 0; i < els.length; i++) {
+      var start = Date.parse(els[i].getAttribute("data-elapsed-since"));
+      if (isNaN(start)) { continue; }
+      var s = Math.max(0, Math.floor((Date.now() - start) / 1000));
+      els[i].textContent = pad(Math.floor(s / 3600)) + ":" + pad(Math.floor(s / 60) % 60) + ":" + pad(s % 60);
+    }
+  }, 1000);
+
   if (project) { connect(); } else { setState("offline", "Offline — static page"); }
 })();

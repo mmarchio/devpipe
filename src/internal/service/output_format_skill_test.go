@@ -8,7 +8,7 @@ import (
 )
 
 // The skill is named after the project ("<slug>-output-format") and
-// carries the reply rule and the full task file format.
+// carries the reply rule: results are submitted, never replied.
 func TestOutputFormatSkill(t *testing.T) {
 	for name, want := range map[string]string{
 		"ComfyUI Environment Builder": "comfyui-environment-builder-output-format",
@@ -24,7 +24,7 @@ func TestOutputFormatSkill(t *testing.T) {
 		"---\nname: comfyui-environment-builder-output-format\ndescription: ",
 		"\n---\n\n# ComfyUI Environment Builder output format\n",
 		returnFormat,
-		TaskFileFormat(worker.FormatMarkdown),
+		"submit_result was called with the command's token before replying",
 		"## Before you reply",
 	} {
 		if !strings.Contains(s, want) {

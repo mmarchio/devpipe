@@ -257,19 +257,6 @@ func (r *EngineRepository) ApproveCriterion(ctx context.Context, executionID, un
 	return nil
 }
 
-// RecordStatefileHash upserts the MD5 of a verified statefile and
-// returns the previous hash ("" for a file verified the first time).
-func (r *EngineRepository) RecordStatefileHash(ctx context.Context, executionID uuid.UUID, path, md5 string) (string, error) {
-	var prev string
-	if err := r.exec.QueryRow(ctx, `WITH prev AS (SELECT md5 FROM statefile_hashes WHERE execution_id = $1 AND path = $2)
-		INSERT INTO statefile_hashes (execution_id, path, md5, verified_at) VALUES ($1, $2, $3, now())
-		ON CONFLICT (execution_id, path) DO UPDATE SET md5 = EXCLUDED.md5, verified_at = EXCLUDED.verified_at
-		RETURNING COALESCE((SELECT md5 FROM prev), '')`, executionID, path, md5).Scan(&prev); err != nil {
-		return "", TranslateDBError("record statefile hash", err)
-	}
-	return prev, nil
-}
-
 // Approvals returns the approved check indexes of a unit.
 func (r *EngineRepository) Approvals(ctx context.Context, ex persistence.Executor, unitID uuid.UUID) (map[int]bool, error) {
 	rows, err := r.ex(ex).Query(ctx, `SELECT check_index FROM acceptance_approvals WHERE work_unit_id = $1`, unitID)

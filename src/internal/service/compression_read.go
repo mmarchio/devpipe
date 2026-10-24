@@ -337,11 +337,16 @@ type CompressionLineage struct {
 	ContextSnapshotID uuid.UUID
 }
 
-// Lineage returns the full chain for a worker prompt (project-scoped).
+// Lineage returns the full chain for a worker prompt (project-scoped). A
+// COMMAND worker prompt has no canonical prompt or compression run, so its
+// lineage is the worker prompt alone.
 func (s *CompressionService) Lineage(ctx context.Context, projectID, workerPromptID uuid.UUID) (*CompressionLineage, error) {
-	wp, err := s.repo.GetWorkerPrompt(ctx, workerPromptID)
+	wp, err := s.repo.GetProjectWorkerPrompt(ctx, projectID, workerPromptID)
 	if err != nil {
 		return nil, translate(err)
+	}
+	if wp.Source == compression.SourceCommand {
+		return &CompressionLineage{WorkerPrompt: wp, Attempts: []compression.Attempt{}}, nil
 	}
 	cp, err := s.canonical.Get(ctx, wp.CanonicalPromptID)
 	if err != nil {

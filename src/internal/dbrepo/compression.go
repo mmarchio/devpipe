@@ -575,6 +575,15 @@ func (r *CompressionRepository) GetWorkerPrompt(ctx context.Context, id uuid.UUI
 	return wp, nil
 }
 
+// GetProjectWorkerPrompt returns one worker prompt of the project.
+func (r *CompressionRepository) GetProjectWorkerPrompt(ctx context.Context, projectID, id uuid.UUID) (*compression.WorkerPrompt, error) {
+	wp, err := scanWorker(r.exec.QueryRow(ctx, `SELECT `+workerColumns+` FROM worker_prompts WHERE id = $1 AND project_id = $2`, id, projectID))
+	if err != nil {
+		return nil, TranslateDBError("get worker prompt", err)
+	}
+	return wp, nil
+}
+
 // GetWorkerPromptByRun returns the run's worker prompt.
 func (r *CompressionRepository) GetWorkerPromptByRun(ctx context.Context, runID uuid.UUID) (*compression.WorkerPrompt, error) {
 	wp, err := scanWorker(r.exec.QueryRow(ctx, `SELECT `+workerColumns+` FROM worker_prompts WHERE run_id = $1`, runID))

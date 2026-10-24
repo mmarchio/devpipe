@@ -345,12 +345,14 @@ func (g *Gateway) models(w http.ResponseWriter) {
 const cdPrefix = "change working directory to "
 
 // cdPath recognises the "change working directory to <path>" prompt (a
-// message of that line alone).
+// message of that line alone, optionally followed by the " — only change
+// the directory ..." instruction of the standalone exchange).
 func cdPath(m ChatMessage) (string, bool) {
 	if m.Role != "user" || !strings.HasPrefix(m.Content, cdPrefix) || strings.Contains(m.Content, "\n") {
 		return "", false
 	}
-	p := strings.TrimSpace(strings.TrimPrefix(m.Content, cdPrefix))
+	p, _, _ := strings.Cut(strings.TrimPrefix(m.Content, cdPrefix), " — ")
+	p = strings.TrimSpace(p)
 	if uq, err := strconv.Unquote(p); err == nil {
 		p = uq
 	}

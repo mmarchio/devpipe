@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,11 +13,10 @@ import (
 	"overseer/internal/execution"
 	"overseer/internal/gateway/hermes/hermestest"
 	"overseer/internal/service"
-	"overseer/internal/wbs"
 )
 
 // requeueAware wraps the fake team: like a project manager following the
-// requeue hint, it puts a requeued task back to TODO before acceptance.
+// requeue hint, it counts a requeued task as not done before acceptance.
 func requeueAware(team *sfTeam, before func(hermestest.Message) *hermestest.Behavior) func(hermestest.Message) *hermestest.Behavior {
 	return func(m hermestest.Message) *hermestest.Behavior {
 		if strings.HasPrefix(m.Content, "have the project manager perform acceptance tasks") && strings.Contains(m.Content, " was requeued") {
@@ -41,14 +38,13 @@ func requeueAware(team *sfTeam, before func(hermestest.Message) *hermestest.Beha
 }
 
 // TestP19RequeueTask — the operator requeues task A while it is being
-// tested: ACTIVE_TASK.md is cleared, A is TODO again with its criteria
-// unchecked in BACKLOG.md, the context is cleared (new session) and the
-// workflow returns to ACCEPTANCE; the project manager reloads A, which
-// restarts from IMPLEMENT (no fix attempt carried over) and the execution
+// tested: A is READY again, the context is cleared (new session) and the
+// workflow returns to ACCEPTANCE; the overseer reloads A, which restarts
+// from IMPLEMENT (no fix attempt carried over) and the execution
 // completes.
 func TestP19RequeueTask(t *testing.T) {
 	r := p16NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}}
+	team := newSFTeam(t, r)
 	r.g.Responder = requeueAware(team, nil)
 	ctx := context.Background()
 
@@ -84,17 +80,8 @@ func TestP19RequeueTask(t *testing.T) {
 	}
 
 	// Applied at once (the execution was idle).
-	active, _ := os.ReadFile(filepath.Join(r.dir, wbs.ActiveTaskFile))
-	if d, err := wbs.ParseTasks(string(active)); err != nil || len(d.Tasks) != 0 {
-		t.Fatalf("ACTIVE_TASK.md not cleared: %q %v", active, err)
-	}
-	backlog, _ := os.ReadFile(filepath.Join(r.dir, wbs.BacklogFile))
-	d, err := wbs.ParseTasks(string(backlog))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a := d.Find("A"); a == nil || a.Status != "TODO" || a.AllMet() {
-		t.Fatalf("task A not reset in BACKLOG.md: %+v", a)
+	if n := r.count(t, "SELECT count(*) FROM work_units WHERE unit_key = 'A' AND status = 'READY' AND project_id = '"+r.pid.String()+"'"); n != 1 {
+		t.Fatal("task A was not reset to READY")
 	}
 	if st := r.state(t); st != "ACCEPTANCE" {
 		t.Fatalf("state after requeue %s, want ACCEPTANCE", st)
@@ -113,8 +100,8 @@ func TestP19RequeueTask(t *testing.T) {
 		t.Fatalf("%d requeue events", n)
 	}
 
-	// The project manager reloads A; it restarts from IMPLEMENT and the
-	// execution completes.
+	// The overseer reloads A; it restarts from IMPLEMENT and the execution
+	// completes.
 	res, err := r.eng().Run(ctx, r.execID, 200)
 	if err != nil {
 		t.Fatalf("run: %v (%s)", err, p16Trace(res))
@@ -122,7 +109,7 @@ func TestP19RequeueTask(t *testing.T) {
 	want := strings.Join([]string{
 		"create the output-format skill", "plan phase 1", "have the project manager perform acceptance tasks",
 		"implement task A", // requeued in TEST, before the test command
-		"have the project manager perform acceptance tasks", // after the requeue: reloads A
+		"have the project manager perform acceptance tasks", // after the requeue: A reloaded
 		"implement task A", "test task A",
 		"have the project manager perform acceptance tasks",
 		"implement task B", "test task B",
@@ -150,11 +137,11 @@ func TestP19RequeueTask(t *testing.T) {
 // step boundary, after which task A restarts from acceptance.
 func TestP19RequeueWhileRunning(t *testing.T) {
 	r := p16NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}}
+	team := newSFTeam(t, r)
 	var once sync.Once
 	inFlight := make(chan struct{})
 	r.g.Responder = requeueAware(team, func(m hermestest.Message) *hermestest.Behavior {
-		if m.Content == "implement task A" {
+		if first, _, _ := strings.Cut(m.Content, "\n"); first == "implement task A" {
 			var slow *hermestest.Behavior
 			once.Do(func() {
 				close(inFlight)
@@ -227,7 +214,7 @@ func p19Post(t *testing.T, url, reason string) int {
 // explicit confirmation; confirming requeues the task.
 func TestP19RequeueConsole(t *testing.T) {
 	r := p17NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}}
+	team := newSFTeam(t, r.p16Rig)
 	r.g.Responder = requeueAware(team, nil)
 	for i := 0; i < 50 && r.state(t) != "TEST"; i++ {
 		r.run(t, 1)
@@ -240,7 +227,7 @@ func TestP19RequeueConsole(t *testing.T) {
 		t.Fatalf("overview lacks the Requeue button next to Cancel:\n%s", textOf(ov))
 	}
 	page := b.mustPage(p + "/requeue")
-	if text := textOf(page); !strings.Contains(text, "Task A Task A restarts from the beginning") || !strings.Contains(text, "ACTIVE_TASK.md") {
+	if text := textOf(page); !strings.Contains(text, "Task A Task A restarts from the beginning") || !strings.Contains(text, "the overseer loads it again") {
 		t.Fatalf("requeue page: %s", text)
 	}
 	if code, _, _ := b.form(p+"/requeue", url.Values{"reason": {"off track"}}); code != http.StatusBadRequest {
@@ -260,12 +247,12 @@ func TestP19RequeueConsole(t *testing.T) {
 }
 
 // TestP19PauseAfterTask — "Pause after done" on the overview (between
-// Pause and Cancel): task A finishes, B is loaded into ACTIVE_TASK.md and
-// the project pauses before "implement task B" is sent; Cancel withdraws
-// a request, and resuming starts B and completes the execution.
+// Pause and Cancel): task A finishes, B is loaded and the project pauses
+// before "implement task B" is sent; Cancel withdraws a request, and
+// resuming starts B and completes the execution.
 func TestP19PauseAfterTask(t *testing.T) {
 	r := p17NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}}
+	team := newSFTeam(t, r.p16Rig)
 	r.g.Responder = requeueAware(team, nil)
 	for i := 0; i < 50 && r.state(t) != "TEST"; i++ {
 		r.run(t, 1)
@@ -298,9 +285,8 @@ func TestP19PauseAfterTask(t *testing.T) {
 	if !strings.HasSuffix(cmds, "test task A | have the project manager perform acceptance tasks") || strings.Contains(cmds, "task B") {
 		t.Fatalf("commands before the pause: %s", cmds)
 	}
-	active, _ := os.ReadFile(filepath.Join(r.dir, wbs.ActiveTaskFile))
-	if d, err := wbs.ParseTasks(string(active)); err != nil || d.Find("B") == nil {
-		t.Fatalf("ACTIVE_TASK.md does not hold B: %v\n%s", err, active)
+	if n := r.count(t, "SELECT count(*) FROM executions x JOIN work_units w ON w.id = x.current_work_unit_id WHERE w.unit_key = 'B' AND x.id = '"+r.execID.String()+"'"); n != 1 {
+		t.Fatal("the paused execution's current task is not B")
 	}
 	ov = b.mustPage(p)
 	if !strings.Contains(ov, ">Resume</button>") || strings.Contains(ov, "pause after done</button>") || strings.Contains(ov, ">Pause after done</button>") {

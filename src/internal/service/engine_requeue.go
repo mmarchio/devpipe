@@ -4,23 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/google/uuid"
 
 	"overseer/internal/execution"
 	"overseer/internal/persistence"
-	"overseer/internal/statefile"
 	"overseer/internal/wbs"
-	"overseer/internal/worker"
 )
 
 // Requeue restarts the current task of a statefile-workflow execution from
-// the beginning (operator action): ACTIVE_TASK.md is cleared and the task
-// is reset to TODO with its criteria unchecked in BACKLOG.md, the worker
+// the beginning (operator action): the task is reset to READY, the worker
 // context is cleared (a new session), the task's attempt counters and
-// manual approvals are reset, and the workflow returns to ACCEPTANCE so
-// the project manager loads the task again.
+// manual approvals are reset, and the workflow returns to ACCEPTANCE,
+// where the overseer loads the task again.
 //
 // A worker command already sent cannot be interrupted, so a requeue is
 // first recorded as a request: it is applied at once when the execution is
@@ -139,32 +135,14 @@ func (e *Engine) pendingRequeue(ctx context.Context, st *engineState) (bool, err
 }
 
 // applyRequeue restarts the current task (the caller holds the driver
-// lease): statefiles first (idempotent), then a new worker session, then
-// one transaction that resets the unit and moves the workflow to
-// ACCEPTANCE.
+// lease): a new worker session, then one transaction that resets the unit
+// and moves the workflow to ACCEPTANCE.
 func (e *Engine) applyRequeue(ctx context.Context, st *engineState) error {
 	u := st.unit
 	key := wbs.UnitKey(u)
 	acceptance, from := st.byKey["ACCEPTANCE"], st.byKey[st.cur.Key]
 	if acceptance == nil || from == nil {
 		return fmt.Errorf("%w: the workflow has no ACCEPTANCE state or the current state is unknown", ErrNotRequeueable)
-	}
-	format, err := e.statefileFormat(ctx, st.rec.ProjectID)
-	if err != nil {
-		return err
-	}
-	cwd := st.cwd()
-	if abs, err := statefile.SafeRelPath(cwd, wbs.BacklogFile); err == nil {
-		if b, err := os.ReadFile(abs); err == nil {
-			if reset, found := wbs.ResetTask(string(b), key); found {
-				if err := writeStatefile(cwd, wbs.BacklogFile, reset); err != nil {
-					return fmt.Errorf("reset %s in %s: %w", key, wbs.BacklogFile, err)
-				}
-			}
-		}
-	}
-	if err := writeStatefile(cwd, wbs.ActiveTaskFile, emptyActiveTask(format)); err != nil {
-		return fmt.Errorf("clear %s: %w", wbs.ActiveTaskFile, err)
 	}
 	var session *uuid.UUID
 	if e.d.Worker != nil {
@@ -230,17 +208,8 @@ func (e *Engine) applyRequeue(ctx context.Context, st *engineState) error {
 	})
 }
 
-// emptyActiveTask is ACTIVE_TASK.md with no task, in the project's
-// statefile format.
-func emptyActiveTask(format worker.ResponseFormat) string {
-	if syntaxFor(format).kv {
-		return "title: Active task\n"
-	}
-	return "# Active task\n\nNo active task.\n"
-}
-
 // requeueHint is appended to the acceptance command after a requeue, until
-// a task is claimed again: the project manager loads the requeued task.
+// a task is claimed again: the overseer loads the requeued task.
 func (e *Engine) requeueHint(ctx context.Context, st *engineState) (string, error) {
 	rq, err := e.d.Repo.LastEvent(ctx, nil, st.rec.ID, execution.EventUnitRequeued, nil)
 	if err != nil || rq == nil {
@@ -257,7 +226,5 @@ func (e *Engine) requeueHint(ctx context.Context, st *engineState) (string, erro
 	if key == "" {
 		return "", nil
 	}
-	return fmt.Sprintf("\n\nTask %s was requeued by the operator and restarts from the beginning: %s is empty and the task is TODO in %s. "+
-		"Load task %s into %s next (status ACTIVE, also in the backlog), with its acceptance criteria unchecked.",
-		key, wbs.ActiveTaskFile, wbs.BacklogFile, key, wbs.ActiveTaskFile), nil
+	return fmt.Sprintf("\n\nTask %s was requeued by the operator and restarts from the beginning; the overseer loads it next.", key), nil
 }

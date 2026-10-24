@@ -63,10 +63,9 @@ var fsWriteSites = map[string]string{
 	"internal/repoinspect/git.go":                "write probe: temp file in the guarded working directory / its git dir, removed at once",
 	"internal/service/state_file_materialize.go": "atomic writes to statefile.SafeRelPath targets under <root>/.overseer/state",
 	"internal/service/web_drift.go":              "drift restore writes resolveMaterializedPath (statefile.SafeRelPath) targets",
-	"internal/service/engine_statefiles.go":      "WBS files written to statefile.SafeRelPath targets under <working directory>/statefiles/wbs (directory confined before MkdirAll)",
+	"internal/service/statefile_guide.go":        "generated team files (HERMES.md, role files) written by writeStatefile to statefile.SafeRelPath targets under <working directory>/statefiles (directory confined before MkdirAll)",
 	"internal/config/yamledit.go":                "the operator's configuration file (OVERSEER_CONFIG_PATH): atomic temp file + rename in its own directory, previous content kept as <path>.bak",
 	"internal/service/system_config.go":          "restores the operator's configuration file (OVERSEER_CONFIG_PATH) when an edit does not load",
-	"internal/service/engine_plan.go":            "statefiles/PLAN_REJECTED.md written (writeStatefile) and removed at statefile.SafeRelPath targets under the working directory",
 }
 
 // T18.85 / T18.86 — inventory of every filesystem write operation in

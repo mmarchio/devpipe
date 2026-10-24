@@ -89,6 +89,9 @@ type CompressionRepository interface {
 
 	CreateWorkerPrompt(ctx context.Context, projectID uuid.UUID, wp *compression.WorkerPrompt) error
 	GetWorkerPrompt(ctx context.Context, id uuid.UUID) (*compression.WorkerPrompt, error)
+	// GetProjectWorkerPrompt returns the worker prompt only when it belongs
+	// to the project (ErrNotFound otherwise).
+	GetProjectWorkerPrompt(ctx context.Context, projectID, id uuid.UUID) (*compression.WorkerPrompt, error)
 	GetWorkerPromptByRun(ctx context.Context, runID uuid.UUID) (*compression.WorkerPrompt, error)
 	ListWorkerPromptsByCanonical(ctx context.Context, canonicalPromptID uuid.UUID) ([]*compression.WorkerPrompt, error)
 

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -63,6 +64,10 @@ type Config struct {
 	// GC configures artifact retention (Phase 18).
 	GC GCConfig `yaml:"gc"`
 
+	// MCP configures the overseer MCP server Hermes connects to (Phase
+	// 19).
+	MCP MCPConfig `yaml:"mcp"`
+
 	// Projects holds defaults applied to new projects.
 	Projects ProjectDefaults `yaml:"projects"`
 
@@ -111,6 +116,58 @@ func (d DiskConfig) Effective() (warn, critical float64, interval time.Duration)
 		interval = time.Minute
 	}
 	return warn, critical, interval
+}
+
+// MCPConfig configures the overseer MCP server (Phase 19): Streamable
+// HTTP on its own listener, separate from the console, so it can be
+// exposed to the Hermes container only. Every request carries the bearer
+// token read from AuthSecretEnv (never stored here); each tool call is
+// further bound to a dispatch by the capability token in its command.
+type MCPConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// Addr is host:port of the listener (default 127.0.0.1:9142).
+	Addr          string `yaml:"addr"`
+	AuthSecretEnv string `yaml:"auth_secret_env"`
+	// TokenTTL bounds a capability token's life (0 = 24h).
+	TokenTTL time.Duration `yaml:"token_ttl"`
+	// MaxResponseBytes caps a tool result (0 = 64 KiB).
+	MaxResponseBytes int `yaml:"max_response_bytes"`
+	// RequestTimeout bounds one tool call (0 = 30s).
+	RequestTimeout time.Duration `yaml:"request_timeout"`
+}
+
+// Effective returns the settings with defaults applied.
+func (m MCPConfig) Effective() MCPConfig {
+	if m.Addr == "" {
+		m.Addr = "127.0.0.1:9142"
+	}
+	if m.TokenTTL <= 0 {
+		m.TokenTTL = 24 * time.Hour
+	}
+	if m.MaxResponseBytes <= 0 {
+		m.MaxResponseBytes = 64 << 10
+	}
+	if m.RequestTimeout <= 0 {
+		m.RequestTimeout = 30 * time.Second
+	}
+	return m
+}
+
+func (m MCPConfig) validate() []error {
+	if !m.Enabled {
+		return nil
+	}
+	var errs []error
+	if _, port, err := net.SplitHostPort(m.Effective().Addr); err != nil || port == "" {
+		errs = append(errs, fmt.Errorf("config: mcp.addr %q must be host:port", m.Addr))
+	}
+	if m.AuthSecretEnv == "" || !envNameRE.MatchString(m.AuthSecretEnv) {
+		errs = append(errs, fmt.Errorf("config: mcp.auth_secret_env must name an environment variable (the MCP bearer token)"))
+	}
+	if m.TokenTTL < 0 || m.RequestTimeout < 0 || m.MaxResponseBytes < 0 {
+		errs = append(errs, fmt.Errorf("config: mcp.token_ttl, mcp.request_timeout and mcp.max_response_bytes must not be negative"))
+	}
+	return errs
 }
 
 // GCConfig is the artifact retention policy (WBS 18.98–18.104, decision
@@ -461,6 +518,18 @@ func applyEnv(cfg *Config) []string {
 	setStr("OVERSEER_SERVER_HOST", &cfg.Server.Host)
 	setStr("OVERSEER_BACKUP_DIR", &cfg.Backup.Dir)
 	setInt("OVERSEER_SERVER_PORT", &cfg.Server.Port)
+	if v, ok := os.LookupEnv("OVERSEER_MCP_ENABLED"); ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.MCP.Enabled = b
+		} else {
+			errs = append(errs, fmt.Sprintf("config: OVERSEER_MCP_ENABLED: %q is not a valid boolean", v))
+		}
+	}
+	setStr("OVERSEER_MCP_ADDR", &cfg.MCP.Addr)
+	setStr("OVERSEER_MCP_AUTH_SECRET_ENV", &cfg.MCP.AuthSecretEnv)
+	setDur("OVERSEER_MCP_TOKEN_TTL", &cfg.MCP.TokenTTL)
+	setDur("OVERSEER_MCP_REQUEST_TIMEOUT", &cfg.MCP.RequestTimeout)
+	setInt("OVERSEER_MCP_MAX_RESPONSE_BYTES", &cfg.MCP.MaxResponseBytes)
 	setStr("OVERSEER_DATABASE_HOST", &cfg.Database.Host)
 	setInt("OVERSEER_DATABASE_PORT", &cfg.Database.Port)
 	setStr("OVERSEER_DATABASE_NAME", &cfg.Database.Name)
@@ -596,6 +665,7 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("config: compression_providers.%s.max_output_tokens must not be negative", name))
 		}
 	}
+	errs = append(errs, c.MCP.validate()...)
 	for _, name := range c.workerProviderNames() {
 		errs = append(errs, c.WorkerProviders[name].validate(name)...)
 	}

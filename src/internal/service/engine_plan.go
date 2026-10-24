@@ -2,22 +2,15 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io/fs"
-	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"overseer/internal/execution"
 	"overseer/internal/persistence"
-	"overseer/internal/statefile"
 	"overseer/internal/wbs"
-	"overseer/internal/worker"
 )
 
 // ---------------------------------------------------------------------------
@@ -76,9 +69,9 @@ func (e *Engine) planMode(ctx context.Context, st *engineState) string {
 
 // candidateFor turns the planning dispatch into a persisted plan candidate
 // (WBS 16.15). Statefile workflow: the worker's reply is not parsed (only
-// its arrival counts); the architect's PLAN.md must exist and the
-// planner's BACKLOG.md is parsed. Composed workflow: the plan travels as
-// the result's `plan` object. A failed dispatch, a protocol failure or a
+// its arrival counts); the plan is the one submitted through the MCP
+// server (submit_result). Composed workflow: the plan travels as the
+// result's `plan` object. A failed dispatch, a protocol failure or a
 // missing / malformed plan is a REJECTED candidate, never a plan.
 func (e *Engine) candidateFor(ctx context.Context, st *engineState, dispatchID uuid.UUID, mode string) (*persistence.PlanCandidateRecord, *wbs.PlanCandidate, error) {
 	if c, err := e.d.Repo.GetCandidateByDispatch(ctx, nil, dispatchID); err == nil {
@@ -97,7 +90,7 @@ func (e *Engine) candidateFor(ctx context.Context, st *engineState, dispatchID u
 	var pc *wbs.PlanCandidate
 	if st.statefileWorkflow() {
 		var err error
-		if pc, err = e.backlogCandidate(ctx, st, dispatchID, mode, rec, reject); err != nil {
+		if pc, err = e.planCandidate(ctx, st, dispatchID, mode, rec, reject); err != nil {
 			return nil, nil, err
 		}
 	} else {
@@ -122,53 +115,6 @@ func (e *Engine) candidateFor(ctx context.Context, st *engineState, dispatchID u
 	}
 	got, err := e.d.Repo.CreateCandidate(ctx, nil, rec)
 	return got, pc, err
-}
-
-// backlogCandidate reads the statefile workflow's plan: the plan command
-// must have been answered, PLAN.md written and BACKLOG.md parse. In an
-// amendment only the backlog's new (repair) tasks form the candidate.
-func (e *Engine) backlogCandidate(ctx context.Context, st *engineState, dispatchID uuid.UUID, mode string, rec *persistence.PlanCandidateRecord,
-	reject func(code, msg string)) (*wbs.PlanCandidate, error) {
-	d, err := e.d.Dispatches.Get(ctx, st.rec.ProjectID, dispatchID)
-	if err != nil {
-		return nil, err
-	}
-	if we := dispatchErr(d); we != nil {
-		reject("NOT_COMPLETE", "the plan command did not complete: "+we.Error())
-		return nil, nil
-	}
-	if _, problem := readPlanningDoc(st.cwd(), wbs.PlanFile); problem != "" {
-		reject("MISSING_PLAN", problem)
-		return nil, nil
-	}
-	md, problem := readPlanningDoc(st.cwd(), wbs.BacklogFile)
-	if problem != "" {
-		reject("MISSING_PLAN", problem)
-		return nil, nil
-	}
-	rec.Markdown = &md
-	doc, err := wbs.ParseTasks(md)
-	if err == nil && len(doc.Tasks) == 0 {
-		err = fmt.Errorf("%w: no tasks (\"## <KEY> — <name>\" sections or \"task: <KEY> — <name>\" lines)", wbs.ErrMalformedTasks)
-	}
-	if err != nil {
-		reject("MALFORMED_PLAN", wbs.BacklogFile+": "+err.Error())
-		return nil, nil
-	}
-	// The backlog keeps every phase's tasks: those planned for another
-	// phase are never this phase's work.
-	other, err := e.otherPhaseKeys(ctx, st)
-	if err != nil {
-		return nil, err
-	}
-	pc := withoutOtherPhases(doc.Candidate(), other)
-	if mode == wbs.PlanKindAmendment {
-		pc = withoutCarried(pc, st.units)
-	}
-	if rec.Payload, err = json.Marshal(pc); err != nil {
-		return nil, err
-	}
-	return pc, nil
 }
 
 // otherPhaseKeys returns the unit keys of every plan of the project's
@@ -296,18 +242,8 @@ func (e *Engine) handlePlanValidate(ctx context.Context, st *engineState, step *
 		}
 	}
 	refs := persistence.StepRefs{DispatchID: pend, Detail: map[string]any{"candidate_id": cand.ID.String(), "mode": mode}}
-	if st.statefileWorkflow() {
-		files, err := e.verifyStatefiles(ctx, st, wbs.PlanFile, wbs.BacklogFile)
-		if err != nil {
-			return execution.StepResult{}, err
-		}
-		refs.Detail["files"] = files
-	}
 	if cand.Status == persistence.CandidateAccepted {
 		// Already activated (crash after the activation commit).
-		if err := clearPlanRejection(st); err != nil {
-			return execution.StepResult{}, err
-		}
 		return e.advance(ctx, st, step, "ACCEPTED", advanceOpts{Refs: refs, SetUnit: true})
 	}
 	if len(problems) > 0 || cand.Status == persistence.CandidateRejected {
@@ -369,9 +305,6 @@ func (e *Engine) handlePlanValidate(ctx context.Context, st *engineState, step *
 		refs.PlanID = nil
 		return e.rejectCandidate(ctx, st, step, cand, wbs.PlanProblems{{Code: "STALE_WBS", Message: "the WBS changed while the plan was generated"}}, refs)
 	}
-	if err == nil {
-		err = clearPlanRejection(st)
-	}
 	return res, err
 }
 
@@ -387,17 +320,6 @@ const recoveryPlanExhausted = "planning attempts exhausted"
 // (which resets the attempts to 0).
 func (e *Engine) rejectCandidate(ctx context.Context, st *engineState, step *persistence.StepRecord, cand *persistence.PlanCandidateRecord,
 	problems wbs.PlanProblems, refs persistence.StepRefs) (execution.StepResult, error) {
-	if st.statefileWorkflow() {
-		// The planner is told why: the next PLAN command points at the
-		// problems (the worker's own checks are not the overseer's).
-		format, err := e.statefileFormat(ctx, st.rec.ProjectID)
-		if err != nil {
-			return execution.StepResult{}, err
-		}
-		if err := writeStatefile(st.cwd(), wbs.PlanRejectedFile, renderPlanRejection(problems, format)); err != nil {
-			return execution.StepResult{}, err
-		}
-	}
 	if cand.Status == persistence.CandidatePending {
 		if err := e.d.Repo.DecideCandidate(ctx, nil, cand.ID, persistence.CandidateRejected, problems, nil); err != nil && !errors.Is(err, persistence.ErrConflict) {
 			return execution.StepResult{}, err
@@ -431,47 +353,4 @@ func (e *Engine) rejectCandidate(ctx context.Context, st *engineState, step *per
 	}
 	return e.advance(ctx, st, step, "REJECTED", advanceOpts{Refs: refs, Outcome: "REJECTED",
 		Events: []pendingEvent{{Type: execution.EventPlanRejected, Payload: payload}}})
-}
-
-// renderPlanRejection renders PLAN_REJECTED.md: every problem of the
-// rejected plan, one per line, in the project's statefile format.
-func renderPlanRejection(problems wbs.PlanProblems, format worker.ResponseFormat) string {
-	var b strings.Builder
-	if syntaxFor(format).kv {
-		b.WriteString("title: Plan rejected\n")
-		fmt.Fprintf(&b, "note: The overseer rejected the plan in %s. Fix every problem below, then rewrite %s (and %s if the plan changes). "+
-			"Keeping the files as they are is rejected again.\n", wbs.BacklogFile, wbs.BacklogFile, wbs.PlanFile)
-		for _, p := range problems {
-			msg := strings.ReplaceAll(p.Message, "\n", " ")
-			if p.Unit != "" {
-				fmt.Fprintf(&b, "problem: %s %s: %s\n", p.Unit, p.Code, msg)
-			} else {
-				fmt.Fprintf(&b, "problem: %s: %s\n", p.Code, msg)
-			}
-		}
-		return b.String()
-	}
-	b.WriteString("# Plan rejected\n\n")
-	fmt.Fprintf(&b, "The overseer rejected the plan in `%s`. Fix every problem below, then rewrite `%s` (and `%s` if the plan changes). "+
-		"Keeping the files as they are is rejected again.\n\n", wbs.BacklogFile, wbs.BacklogFile, wbs.PlanFile)
-	for _, p := range problems {
-		if p.Unit != "" {
-			fmt.Fprintf(&b, "- `%s` %s: %s\n", p.Unit, p.Code, p.Message)
-		} else {
-			fmt.Fprintf(&b, "- %s: %s\n", p.Code, p.Message)
-		}
-	}
-	return b.String()
-}
-
-// clearPlanRejection removes PLAN_REJECTED.md once a plan is accepted.
-func clearPlanRejection(st *engineState) error {
-	abs, err := statefile.SafeRelPath(st.cwd(), wbs.PlanRejectedFile)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	return nil
 }

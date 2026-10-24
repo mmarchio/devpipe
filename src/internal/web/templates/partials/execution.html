@@ -26,7 +26,7 @@
 {{if .Running}}<div class="banner info" role="status"><strong>{{if eq .Running "ANALYZE"}}Analyzing task {{.Task}}…{{else}}Fixing task {{.Task}}…{{end}}</strong>
 The architect is working on it; this panel updates when it finishes. Resume and recovery actions wait until then.</div>{{end}}
 {{with .Interrupted}}<p class="muted">The last {{if eq . "ANALYZE"}}analysis{{else}}fix{{end}} was interrupted before it finished (the overseer stopped); run it again.</p>{{end}}
-<p class="muted">The architect analyzes the task in ACTIVE_TASK.md, what PLAN.md and the phase WBS say about it, and its tests and validation, looking for optimizations that remove the recovery reason (or keep a paused task from failing). Fix task implements them (task definition, tests or code); a changed definition is adopted only if it keeps the task's key, kind and dependencies. The execution stays paused or in recovery until you resume it.</p>
+<p class="muted">The architect analyzes the task's definition, the phase WBS and plan, and its tests and validation, looking for optimizations that remove the recovery reason (or keep a paused task from failing). Fix task implements them (task definition, tests or code); a changed definition is adopted only if it keeps the task's key, kind and dependencies. The execution stays paused or in recovery until you resume it.</p>
 {{with .Analysis}}<h3>Latest analysis <span class="muted">({{fmtTime .At}})</span></h3>
 {{if .Error}}<p>{{template "badge" "FAILED"}} {{.Error}}</p>{{else}}<p>{{if .Fixable}}{{template "badge" "PASS"}} Optimizations found{{else}}{{template "badge" "BLOCKED"}} No optimization that fixes the recovery reason was found{{end}}</p>
 {{with .Findings}}<h4>Findings</h4><ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}

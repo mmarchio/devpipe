@@ -168,7 +168,8 @@ func TestT1890Slowloris(t *testing.T) {
 // through the web reaches READY and execution readiness; seeding is
 // idempotent across restarts.
 func TestP1820FreshInstallReachesReady(t *testing.T) {
-	h, _, _ := p15Harness(t, p17Config(nil))
+	// A new project gets the statefile workflow, which needs the MCP server.
+	h, _, _ := p15Harness(t, p17Config(p19mcpConfig(t)))
 	b := newBrowser(t, h.BaseURL)
 	dir := p15Repo(t)
 	code, body, final := b.form("/projects", url.Values{"name": {"Fresh"}, "working_directory": {dir}, "worker_provider": {"hermes"},

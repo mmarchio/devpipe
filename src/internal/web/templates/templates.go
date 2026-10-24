@@ -123,6 +123,8 @@ func Funcs() template.FuncMap {
 		"newKey":   func() string { return uuid.NewString() },
 		"fmtTime":  fmtTime,
 		"ago":      ago,
+		"elapsed":  elapsed,
+		"rfc3339":  rfc3339,
 		"pct":      func(f float64) string { return fmt.Sprintf("%.1f%%", f) },
 		"truncate": truncate,
 		"bytes":    humanBytes,
@@ -226,6 +228,31 @@ func ago(v any) string {
 		d = 0
 	}
 	return d.String() + " ago"
+}
+
+// elapsed formats the time from start to end (now when end is nil) as
+// hh:mm:ss; hours grow past 99 rather than wrapping.
+func elapsed(start, end *time.Time) string {
+	if start == nil || start.IsZero() {
+		return "—"
+	}
+	stop := time.Now()
+	if end != nil && !end.IsZero() {
+		stop = *end
+	}
+	s := int64(stop.Sub(*start) / time.Second)
+	if s < 0 {
+		s = 0
+	}
+	return fmt.Sprintf("%02d:%02d:%02d", s/3600, s/60%60, s%60)
+}
+
+// rfc3339 renders a time for data attributes ("" when unset).
+func rfc3339(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func truncate(s string, n int) string {

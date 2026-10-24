@@ -123,8 +123,9 @@ func defaultTemplateSpecs() []defaultTemplateSpec {
 		// default workflow resolves during bootstrap readiness.
 		// Statefile workflow commands: each CMD_ template is sent to the
 		// worker as is ({{command.phase}} = the phase number,
-		// {{command.task}} = the active task's key); the team's own role
-		// instructions say how to act on it.
+		// {{command.task}} = the active task's key), followed by its MCP
+		// capability token; the team's own role instructions say how to
+		// act on it, and it submits the result through the MCP server.
 		{key: "CMD_SKILL", purpose: prompt.PurposeCustom, name: "Command: create output-format skill",
 			description: "Sent by the SKILL state at the start of every execution: Hermes saves the project's required response formatting as the <project>-output-format skill (the skill content is appended by the overseer).",
 			content:     "create the {{command.skill}} skill"},
@@ -132,19 +133,19 @@ func defaultTemplateSpecs() []defaultTemplateSpec {
 			description: "Sent by the REPLAN state when the overseer's validation failed a task the same way repeatedly: the ARCHITECT rewrites the task so it can pass (the failure and the validation environment are appended by the overseer).",
 			content:     "have the architect replan task {{command.task}}"},
 		{key: "CMD_PLAN", purpose: prompt.PurposeCustom, name: "Command: plan phase",
-			description: "Sent by the PLAN state: the ARCHITECT plans the phase WBS into statefiles/PLAN.md, the PLANNER breaks it into statefiles/BACKLOG.md.",
+			description: "Sent by the PLAN state: the ARCHITECT plans the phase WBS and the PLANNER breaks it into atomic tasks, submitted as the plan through the overseer MCP server.",
 			content:     "plan phase {{command.phase}}"},
 		{key: "CMD_IMPLEMENT", purpose: prompt.PurposeCustom, name: "Command: implement task",
-			description: "Sent by the IMPLEMENT state: the ENGINEER implements the task in statefiles/ACTIVE_TASK.md.",
+			description: "Sent by the IMPLEMENT state: the ENGINEER implements the active task (get_task).",
 			content:     "implement task {{command.task}}"},
 		{key: "CMD_CONTINUE", purpose: prompt.PurposeCustom, name: "Command: continue",
 			description: "Sent by the CONTINUE state: the ENGINEER continues the active task after an interrupted run.",
 			content:     "continue"},
 		{key: "CMD_TEST", purpose: prompt.PurposeCustom, name: "Command: test task",
-			description: "Sent by the TEST state: the TESTER tests the active task, checks met acceptance criteria and sets COMPLETE when all are met.",
+			description: "Sent by the TEST state: the TESTER tests the active task and submits which acceptance criteria are met (COMPLETE when all are).",
 			content:     "test task {{command.task}}"},
 		{key: "CMD_ACCEPTANCE", purpose: prompt.PurposeCustom, name: "Command: acceptance",
-			description: "Sent by the ACCEPTANCE state: the PROJECT_MANAGER marks the completed task DONE, archives it to statefiles/TASK_ARCHIVE.md and loads the next task into statefiles/ACTIVE_TASK.md.",
+			description: "Sent by the ACCEPTANCE state: the PROJECT_MANAGER accepts the completed task; the overseer archives it and loads the next task.",
 			content:     "have the project manager perform acceptance tasks"},
 		{key: "PHASE_PLAN", purpose: prompt.PurposePhasePlanning, name: "Plan phase (state reference)",
 			description: "Default prompt referenced by the PHASE_PLAN state (WBS 6.7 alias of PLAN_PHASE).",

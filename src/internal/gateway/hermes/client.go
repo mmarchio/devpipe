@@ -269,7 +269,8 @@ func (c *HTTPClient) Get(_ context.Context, sessionID string) (GatewaySession, e
 }
 
 // ChangeDirectory issues "cd": the session's first prompt tells the
-// agent to change to the working directory (ChangeDirectoryPrompt). A
+// agent to change to the working directory and do nothing else
+// (ChangeDirectoryOnlyPrompt). A
 // reply confirms it; the exchange stays in the session history, so every
 // later message carries it. A failed send leaves the directory unchanged.
 func (c *HTTPClient) ChangeDirectory(ctx context.Context, sessionID, path, model string) (GatewaySession, error) {
@@ -280,7 +281,7 @@ func (c *HTTPClient) ChangeDirectory(ctx context.Context, sessionID, path, model
 		return GatewaySession{}, sessionNotFound(sessionID)
 	}
 	rid := uuid.NewString()
-	if _, _, err := c.send(ctx, sessionID, GatewayRequest{RequestID: rid, Model: model, Content: ChangeDirectoryPrompt(path)}, "cd:"+rid, false); err != nil {
+	if _, _, err := c.send(ctx, sessionID, GatewayRequest{RequestID: rid, Model: model, Content: ChangeDirectoryOnlyPrompt(path)}, "cd:"+rid, false); err != nil {
 		return GatewaySession{}, err
 	}
 	c.mu.Lock()

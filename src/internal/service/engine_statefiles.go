@@ -1,46 +1,40 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
-	"overseer/internal/bounds"
 	"overseer/internal/compression"
 	"overseer/internal/execution"
 	"overseer/internal/persistence"
-	"overseer/internal/statefile"
 	"overseer/internal/wbs"
 	"overseer/internal/worker"
 )
 
 // ---------------------------------------------------------------------------
 // Statefile workflow. Every action state sends one command to the worker
-// (its CMD_ template, rendered as is) and the team works in
-// <working directory>/statefiles:
+// (its CMD_ template, rendered as is, with an MCP capability token) and
+// the team submits the command's result through the overseer MCP server:
 //
 //	SKILL       "create the <project>-output-format skill"
-//	PLAN        "plan phase <N>"   ARCHITECT writes PLAN.md, PLANNER BACKLOG.md
-//	ACCEPTANCE  "...acceptance..."  PROJECT_MANAGER archives the finished task
-//	                               and loads the next one into ACTIVE_TASK.md
-//	IMPLEMENT   "implement task <K>" ENGINEER implements ACTIVE_TASK.md
+//	PLAN        "plan phase <N>"   ARCHITECT + PLANNER submit the phase plan
+//	ACCEPTANCE  "...acceptance..."  PROJECT_MANAGER accepts the finished task;
+//	                               the overseer archives it and loads the next
+//	IMPLEMENT   "implement task <K>" ENGINEER implements the active task
 //	CONTINUE    "continue"         ENGINEER resumes an interrupted run
-//	TEST        "test task <K>"    TESTER checks the criteria; all met → COMPLETE
+//	TEST        "test task <K>"    TESTER reports the criteria; all met → COMPLETE
 //
-// The check states read the statefiles back and decide every transition;
-// the worker's reply is never parsed. Deterministic validation and the
-// checkpoint run under overseer control between TEST and acceptance.
+// The check states read the submitted results (task_reports) and decide
+// every transition; the worker's reply is never parsed. Deterministic
+// validation and the checkpoint run under overseer control between TEST
+// and acceptance. The statefiles that once held the workflow state are no
+// longer read or written; only the generated team files remain on disk.
 
 // maxCommandRetries bounds resending a command whose dispatch failed.
 const maxCommandRetries = 3
@@ -87,11 +81,11 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 	if err != nil {
 		return "", err
 	}
-	format, err := e.statefileFormat(ctx, st.rec.ProjectID)
-	if err != nil {
-		return "", err
-	}
 	if key == "CMD_SKILL" {
+		format, err := e.responseFormat(ctx, st.rec.ProjectID)
+		if err != nil {
+			return "", err
+		}
 		return cmd + "\n\nCreate this Hermes skill now with your skill management tool, named " + vars[CommandVarSkill] +
 			" (replace an existing skill of that name), with exactly the SKILL.md content below. Load and follow it for every command of this project. " +
 			"Reply once it is saved.\n\n````markdown\n" + feedback(OutputFormatSkill(p.Name, format)) + "````", nil
@@ -101,8 +95,7 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 		return "", err
 	}
 	if problem != "" {
-		cmd += "\n\nThe statefiles you wrote for this command were rejected: " + feedback(problem) +
-			". Fix them to the layout and rules in " + GuideFile + " and redo this command." + expectedFormat(format)
+		cmd += "\n\nThe result of this command was rejected: " + feedback(problem) + ". Redo this command and submit its result."
 	}
 	if key == "CMD_ACCEPTANCE" {
 		hint, err := e.requeueHint(ctx, st)
@@ -112,7 +105,7 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 		cmd += hint
 	}
 	if key == "CMD_REPLAN" {
-		rc, err := e.replanContext(ctx, st, format)
+		rc, err := e.replanContext(ctx, st)
 		if err != nil {
 			return "", err
 		}
@@ -121,9 +114,7 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 	if key != "CMD_PLAN" {
 		return cmd, nil
 	}
-	// A rejected plan: the problems travel in the command (and in
-	// PLAN_REJECTED.md, which also covers a rejection from an earlier
-	// execution of the project).
+	// A rejected plan: the problems travel in the command.
 	var problems wbs.PlanProblems
 	if work := st.workPhase(); work != nil {
 		c, err := e.d.Repo.LatestCandidate(ctx, nil, st.rec.ID, work.ID)
@@ -134,38 +125,23 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 			return "", err
 		}
 	}
-	if len(problems) > 0 {
-		lines := make([]string, 0, len(problems))
-		for _, p := range problems {
-			if p.Unit != "" {
-				lines = append(lines, fmt.Sprintf("- %s %s: %s", p.Unit, p.Code, p.Message))
-			} else {
-				lines = append(lines, fmt.Sprintf("- %s: %s", p.Code, p.Message))
-			}
-		}
-		cmd += "\n\nThe previous plan was rejected:\n" + feedback(strings.Join(lines, "\n")) + "\nFix every problem (also listed in " +
-			wbs.PlanRejectedFile + ") and rewrite " + wbs.BacklogFile + "; do not keep the files as they are." + expectedFormat(format)
+	if len(problems) == 0 {
 		return cmd, nil
 	}
-	if abs, err := statefile.SafeRelPath(st.cwd(), wbs.PlanRejectedFile); err == nil {
-		if _, err := os.Stat(abs); err == nil {
-			cmd += "\n\nThe previous plan was rejected. Fix every problem listed in " + wbs.PlanRejectedFile +
-				" and rewrite " + wbs.BacklogFile + "; do not keep the files as they are." + expectedFormat(format)
+	lines := make([]string, 0, len(problems))
+	for _, p := range problems {
+		if p.Unit != "" {
+			lines = append(lines, fmt.Sprintf("- %s %s: %s", p.Unit, p.Code, p.Message))
+		} else {
+			lines = append(lines, fmt.Sprintf("- %s: %s", p.Code, p.Message))
 		}
 	}
-	return cmd, nil
+	return cmd + "\n\nThe previous plan was rejected:\n" + feedback(strings.Join(lines, "\n")) + "\nFix every problem and submit the corrected plan.", nil
 }
 
-// expectedFormat is the task file layout a resent command carries, so the
-// team can fix its files without looking the format up.
-func expectedFormat(format worker.ResponseFormat) string {
-	return "\n\nExpected format:\n\n" + TaskFileFormat(format)
-}
-
-// statefileFormat is the project's statefile format: its worker response
-// format (Markdown when no worker service is wired). Task files are read
-// in either format; this decides what the team is told to write.
-func (e *Engine) statefileFormat(ctx context.Context, projectID uuid.UUID) (worker.ResponseFormat, error) {
+// responseFormat is the project's worker response format (Markdown when
+// no worker service is wired): how the team is told to format its replies.
+func (e *Engine) responseFormat(ctx context.Context, projectID uuid.UUID) (worker.ResponseFormat, error) {
 	if e.d.Worker == nil {
 		return worker.FormatMarkdown, nil
 	}
@@ -177,7 +153,7 @@ func (e *Engine) statefileFormat(ctx context.Context, projectID uuid.UUID) (work
 }
 
 // feedback makes problem text safe to send in a command: a placeholder
-// marker quoted from a statefile would make the command unsendable.
+// marker quoted from a submitted result would make the command unsendable.
 func feedback(s string) string {
 	return strings.ReplaceAll(s, compression.PlaceholderMarker, "[placeholder]")
 }
@@ -220,8 +196,14 @@ func (e *Engine) prepareCommand(ctx context.Context, st *engineState, step *pers
 		p.roleKey = st.cur.Roles[0]
 	}
 	if step.WorkerPromptID != nil {
-		p.promptID = *step.WorkerPromptID
-		return p, nil
+		// A command prepared without a capability token (for the retired
+		// statefiles, before an upgrade) is prepared again.
+		if ok, err := e.promptHasToken(ctx, *step.WorkerPromptID); err != nil {
+			return nil, err
+		} else if ok {
+			p.promptID = *step.WorkerPromptID
+			return p, nil
+		}
 	}
 	if e.d.CommandPrompts == nil {
 		return nil, fmt.Errorf("%w: command prompts are not configured", ErrInfrastructure)
@@ -230,11 +212,8 @@ func (e *Engine) prepareCommand(ctx context.Context, st *engineState, step *pers
 	if err != nil {
 		return nil, err
 	}
-	wp, err := compression.WorkerPromptFromCommand(cmd, e.d.Now().UTC())
+	wp, err := e.commandPrompt(ctx, st, cmd, st.cur.Key, p.roleKey)
 	if err != nil {
-		return nil, fmt.Errorf("command %q: %w", cmd, err)
-	}
-	if err := e.d.CommandPrompts.CreateWorkerPrompt(ctx, st.rec.ProjectID, &wp); err != nil {
 		return nil, err
 	}
 	p.promptID = wp.ID
@@ -279,10 +258,8 @@ func (e *Engine) handleCommand(ctx context.Context, st *engineState, step *persi
 			if st.wbsVer <= 0 {
 				return e.requireRecovery(ctx, st, step, "the phase has no WBS to plan from", map[string]any{"phase_id": pid.String()})
 			}
-			// The team plans from the approved WBS, with a clear context.
-			if err := e.loadWBSFiles(ctx, st); err != nil {
-				return execution.StepResult{}, err
-			}
+			// The team plans from the approved WBS (get_context), with a
+			// clear context.
 			if stop, err := e.freshSession(ctx, st, step); stop != nil || err != nil {
 				if err != nil {
 					return execution.StepResult{}, err
@@ -322,13 +299,6 @@ func (e *Engine) handleCommand(ctx context.Context, st *engineState, step *persi
 					return *stop, nil
 				}
 			}
-			if tmpl == "CMD_TEST" {
-				// The tester must record its result in ACTIVE_TASK.md: its
-				// hash before the command tells the test check whether it did.
-				if _, err := e.verifyStatefiles(ctx, st, wbs.ActiveTaskFile); err != nil {
-					return execution.StepResult{}, err
-				}
-			}
 			if tmpl != "CMD_TEST" && st.unit.Status != wbs.WorkUnitStatusEXECUTING {
 				// Implementation (re)starts: the unit is EXECUTING again.
 				if err := e.d.Repo.SetUnitStatus(ctx, nil, st.unit.ID, []wbs.WorkUnitStatus{wbs.WorkUnitStatusINCOMPLETE, wbs.WorkUnitStatusVALIDATING,
@@ -336,6 +306,16 @@ func (e *Engine) handleCommand(ctx context.Context, st *engineState, step *persi
 					return execution.StepResult{}, err
 				}
 			}
+		}
+	}
+	if reset, err := e.pendingContextReset(ctx, st); err != nil {
+		return execution.StepResult{}, err
+	} else if reset {
+		if stop, err := e.freshSession(ctx, st, step); stop != nil || err != nil {
+			if err != nil {
+				return execution.StepResult{}, err
+			}
+			return *stop, nil
 		}
 	}
 	out, stop, err := e.dispatchStep(ctx, st, step, req)
@@ -485,134 +465,6 @@ func (e *Engine) freshSession(ctx context.Context, st *engineState, step *persis
 	return nil, nil
 }
 
-// loadWBSFiles writes every phase's current WBS to statefiles/wbs
-// (creating the directory), so the team plans from the approved WBS.
-func (e *Engine) loadWBSFiles(ctx context.Context, st *engineState) error {
-	for _, ph := range st.phases {
-		v, err := e.d.WBSVersions.GetCurrentVersion(ctx, ph.ID.String())
-		if err != nil || v <= 0 {
-			continue
-		}
-		rec, err := e.d.WBSVersions.GetVersion(ctx, ph.ID.String(), v)
-		if err != nil {
-			return err
-		}
-		if err := writeStatefile(st.cwd(), wbs.WBSFile(ph.Order), rec.Content); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// writeStatefile writes content to rel under the working directory
-// (creating directories) unless it already holds exactly that content.
-func writeStatefile(cwd, rel, content string) error {
-	// Both the directory and the file are confined to the working
-	// directory (symlinks resolved) before anything is written.
-	dir, err := statefile.SafeRelPath(cwd, filepath.Dir(rel))
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	abs, err := statefile.SafeRelPath(cwd, rel)
-	if err != nil {
-		return err
-	}
-	if cur, err := os.ReadFile(abs); err == nil && bytes.Equal(cur, []byte(content)) {
-		return nil
-	}
-	tmp := abs + ".tmp"
-	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, abs)
-}
-
-// readPlanningDoc reads a statefile the team wrote under the working
-// directory. The problem is non-empty when the file is missing, unsafe,
-// empty or too large.
-func readPlanningDoc(cwd, rel string) (content, problem string) {
-	abs, err := statefile.SafeRelPath(cwd, rel)
-	if err != nil {
-		return "", fmt.Sprintf("%s is not a safe path in the working directory: %v", rel, err)
-	}
-	b, err := os.ReadFile(abs)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return "", rel + " was not written"
-	case err != nil:
-		return "", fmt.Sprintf("%s cannot be read: %v", rel, err)
-	}
-	content = string(b)
-	if strings.TrimSpace(content) == "" {
-		return "", rel + " is empty"
-	}
-	if err := bounds.Check(bounds.WBS, content); err != nil {
-		return "", fmt.Sprintf("%s: %v", rel, err)
-	}
-	return content, ""
-}
-
-// readTaskFile parses a task statefile; a missing file (when allowed) or
-// one without task sections has no tasks.
-func readTaskFile(cwd, rel string, allowMissing bool) (*wbs.TaskDoc, string) {
-	content, problem := readPlanningDoc(cwd, rel)
-	if problem != "" {
-		if allowMissing && (strings.HasSuffix(problem, "was not written") || strings.HasSuffix(problem, "is empty")) {
-			return &wbs.TaskDoc{}, ""
-		}
-		return nil, problem
-	}
-	d, err := wbs.ParseTasks(content)
-	if err != nil {
-		return nil, rel + ": " + err.Error()
-	}
-	return d, ""
-}
-
-// Statefile verification outcomes.
-const (
-	FileCreated   = "CREATED"   // first verification of the file
-	FileChanged   = "CHANGED"   // overwritten with different content
-	FileUnchanged = "UNCHANGED" // same content as the last verification
-)
-
-// verifyStatefiles hashes each statefile the team wrote (MD5 of its
-// bytes, read at its expected path under the working directory), stores
-// the hash and compares it with the stored one. Missing files are
-// skipped: the reads before it already decided whether they may be
-// missing. The result maps each verified path to its outcome.
-func (e *Engine) verifyStatefiles(ctx context.Context, st *engineState, rels ...string) (map[string]string, error) {
-	out := map[string]string{}
-	for _, rel := range rels {
-		abs, err := statefile.SafeRelPath(st.cwd(), rel)
-		if err != nil {
-			continue
-		}
-		b, err := os.ReadFile(abs)
-		if err != nil {
-			continue
-		}
-		sum := md5.Sum(b)
-		cur := hex.EncodeToString(sum[:])
-		prev, err := e.d.Repo.RecordStatefileHash(ctx, st.rec.ID, rel, cur)
-		if err != nil {
-			return nil, err
-		}
-		switch prev {
-		case "":
-			out[rel] = FileCreated
-		case cur:
-			out[rel] = FileUnchanged
-		default:
-			out[rel] = FileChanged
-		}
-	}
-	return out, nil
-}
-
 // statefileWorkflow reports whether the execution runs the statefile
 // workflow (its machine has the ACCEPTANCE_CHECK state).
 func (st *engineState) statefileWorkflow() bool {
@@ -650,11 +502,12 @@ func (e *Engine) commandFailed(ctx context.Context, st *engineState, step *persi
 }
 
 // detailStatefileProblem is the step detail key holding why a check state
-// rejected the team's statefiles; the resent command carries it.
+// rejected the team's submitted result; the resent command carries it.
+// (The key predates the MCP results and is kept: step history uses it.)
 const detailStatefileProblem = "statefile_problem"
 
-// statefileRetry handles statefiles the team wrote wrongly (unparsable,
-// missing, or contradicting the workflow rules): the command is resent
+// statefileRetry handles a result the team submitted wrongly (missing,
+// malformed, or contradicting the workflow rules): the command is resent
 // with the problem appended (RETRY, bounded by maxCommandRetries), then
 // recovery.
 func (e *Engine) statefileRetry(ctx context.Context, st *engineState, step *persistence.StepRecord, problem string, refs persistence.StepRefs) (execution.StepResult, error) {
@@ -674,8 +527,8 @@ func (e *Engine) statefileRetry(ctx context.Context, st *engineState, step *pers
 }
 
 // consecutiveStatefileRetries counts the check state's most recent
-// applied steps that rejected the statefiles, back to the last one that
-// did not.
+// applied steps that rejected the submitted result, back to the last one
+// that did not.
 func (e *Engine) consecutiveStatefileRetries(ctx context.Context, st *engineState, stateKey string) (int, error) {
 	steps, _, err := e.d.Repo.ListSteps(ctx, st.rec.ID, -1, 0)
 	if err != nil {
@@ -703,7 +556,8 @@ func (e *Engine) consecutiveStatefileRetries(ctx context.Context, st *engineStat
 }
 
 // lastStatefileProblem returns the problem of the most recent applied step
-// when that step rejected the statefiles and resent this command ("" otherwise).
+// when that step rejected the submitted result and resent this command
+// ("" otherwise).
 func (e *Engine) lastStatefileProblem(ctx context.Context, st *engineState) (string, error) {
 	steps, _, err := e.d.Repo.ListSteps(ctx, st.rec.ID, -1, 0)
 	if err != nil {
@@ -771,6 +625,12 @@ func (e *Engine) handleImplementCheck(ctx context.Context, st *engineState, step
 	}
 	we := dispatchErr(d)
 	if we == nil {
+		if stop, err := e.implementResult(ctx, st, step, *pend, refs); stop != nil || err != nil {
+			if err != nil {
+				return execution.StepResult{}, err
+			}
+			return *stop, nil
+		}
 		return e.advance(ctx, st, step, "REPLIED", advanceOpts{Refs: refs, Outcome: "REPLIED"})
 	}
 	switch we.Code {
@@ -781,28 +641,10 @@ func (e *Engine) handleImplementCheck(ctx context.Context, st *engineState, step
 		map[string]any{"dispatch_id": pend.String(), "code": string(we.Code)})
 }
 
-// activeTask reads ACTIVE_TASK.md and requires it to hold exactly the
-// active unit.
-func (e *Engine) activeTask(st *engineState) (*wbs.Task, string) {
-	d, problem := readTaskFile(st.cwd(), wbs.ActiveTaskFile, false)
-	if problem != "" {
-		return nil, problem
-	}
-	key := wbs.UnitKey(st.unit)
-	if len(d.Tasks) != 1 || d.Tasks[0].Unit.Key != key {
-		names := make([]string, 0, len(d.Tasks))
-		for _, t := range d.Tasks {
-			names = append(names, t.Unit.Key)
-		}
-		return nil, fmt.Sprintf("%s must hold the active task %s; it holds [%s]", wbs.ActiveTaskFile, key, strings.Join(names, ", "))
-	}
-	return &d.Tasks[0], ""
-}
-
-// handleTestCheck: the TESTER marks every acceptance criterion and sets
+// handleTestCheck: the TESTER reports every acceptance criterion and
 // COMPLETE when all are met → overseer validation; otherwise the ENGINEER
-// gets the task again. Checked MANUAL criteria are recorded as the
-// tester's approvals.
+// gets the task again. Met MANUAL criteria are recorded as the tester's
+// approvals.
 func (e *Engine) handleTestCheck(ctx context.Context, st *engineState, step *persistence.StepRecord) (execution.StepResult, error) {
 	pend, err := e.pendingDispatch(ctx, st)
 	if err != nil {
@@ -818,54 +660,7 @@ func (e *Engine) handleTestCheck(ctx context.Context, st *engineState, step *per
 		}
 		return *stop, nil
 	}
-	t, problem := e.activeTask(st)
-	if problem != "" {
-		return e.statefileRetry(ctx, st, step, problem, refs)
-	}
-	var checks []wbs.AcceptanceCheckSpec
-	if st.unit.Specification != nil {
-		checks = st.unit.Specification.AcceptanceChecks
-	}
-	if len(t.Met) != len(checks) {
-		return e.statefileRetry(ctx, st, step, fmt.Sprintf("%s lists %d acceptance criteria; the planned task has %d", wbs.ActiveTaskFile, len(t.Met), len(checks)),
-			refs)
-	}
-	files, err := e.verifyStatefiles(ctx, st, wbs.ActiveTaskFile)
-	if err != nil {
-		return execution.StepResult{}, err
-	}
-	if files[wbs.ActiveTaskFile] == FileUnchanged && (t.Status != wbs.TaskStatusComplete || !t.AllMet()) {
-		// Nothing was recorded: not a failed test, so the engineer does
-		// not get the task again; the tester is asked to record it.
-		format, err := e.statefileFormat(ctx, st.rec.ProjectID)
-		if err != nil {
-			return execution.StepResult{}, err
-		}
-		return e.statefileRetry(ctx, st, step, reasonTestNotRecorded(format), refs)
-	}
-	ev := map[string]any{"work_unit_id": st.unit.ID.String(), "status": t.Status, "met": t.Met, "files": files}
-	refs.Detail = ev
-	if t.Status != wbs.TaskStatusComplete || !t.AllMet() {
-		return e.advance(ctx, st, step, "INCOMPLETE", advanceOpts{Refs: refs, Outcome: "INCOMPLETE"})
-	}
-	for i, ch := range checks {
-		if ch.Verification == wbs.VerifyManual {
-			if err := e.d.Repo.ApproveCriterion(ctx, st.rec.ID, st.unit.ID, i, "TESTER", "checked in "+wbs.ActiveTaskFile); err != nil && !errors.Is(err, persistence.ErrConflict) {
-				return execution.StepResult{}, translate(err)
-			}
-		}
-	}
-	uid := st.unit.ID
-	return e.advance(ctx, st, step, "COMPLETE", advanceOpts{Refs: refs, Outcome: "COMPLETE", Tx: toValidating(ctx, e, uid)})
-}
-
-// reasonTestNotRecorded is the problem of a test command whose result was
-// not written to ACTIVE_TASK.md (the file is byte-for-byte unchanged).
-func reasonTestNotRecorded(format worker.ResponseFormat) string {
-	sx := syntaxFor(format)
-	return "the tester did not record the test result: " + wbs.ActiveTaskFile + " is unchanged since the test command was sent. " +
-		"Check " + sx.checked() + " each acceptance criterion that is met and set " + sx.status("COMPLETE") + " when all are met; otherwise leave the status and note what fails " +
-		strings.ReplaceAll(sx.notes(), "`", "") + ". A result reported only in the reply is not read"
+	return e.testResult(ctx, st, step, *pend, refs)
 }
 
 // toValidating moves a unit to VALIDATING (its tester reported every
@@ -881,11 +676,11 @@ func toValidating(ctx context.Context, e *Engine, uid uuid.UUID) func(persistenc
 	}
 }
 
-// handleAcceptanceCheck: the PROJECT_MANAGER archived the finished task
-// (DONE in TASK_ARCHIVE.md and BACKLOG.md, gone from ACTIVE_TASK.md) and
-// ACTIVE_TASK.md holds the next executable task (NEXT) or nothing when
-// every task is done (PHASE_COMPLETE). A task found already COMPLETE
-// (resumed execution) goes straight to validation (TESTED).
+// handleAcceptanceCheck: the PROJECT_MANAGER's result accepts the
+// finished task, and the overseer loads the next executable task (NEXT)
+// or completes the phase (PHASE_COMPLETE). A task still in progress
+// (resumed execution) continues, or goes straight to validation (TESTED)
+// when it was tested already.
 func (e *Engine) handleAcceptanceCheck(ctx context.Context, st *engineState, step *persistence.StepRecord) (execution.StepResult, error) {
 	if st.plan == nil {
 		return e.requireRecovery(ctx, st, step, "no current plan", nil)
@@ -903,196 +698,7 @@ func (e *Engine) handleAcceptanceCheck(ctx context.Context, st *engineState, ste
 			return *stop, nil
 		}
 	}
-	backlog, problem := readTaskFile(st.cwd(), wbs.BacklogFile, false)
-	if problem != "" {
-		return e.statefileRetry(ctx, st, step, problem, refs)
-	}
-	active, problem := readTaskFile(st.cwd(), wbs.ActiveTaskFile, true)
-	if problem != "" {
-		return e.statefileRetry(ctx, st, step, problem, refs)
-	}
-	files, err := e.verifyStatefiles(ctx, st, wbs.BacklogFile, wbs.ActiveTaskFile, wbs.ArchiveFile)
-	if err != nil {
-		return execution.StepResult{}, err
-	}
-	refs.Detail = map[string]any{"files": files}
-	byKey := map[string]*wbs.WorkUnit{}
-	for _, u := range st.units {
-		byKey[wbs.UnitKey(u)] = u
-	}
-	var txs []func(tx persistence.Transaction) error
-	var events []pendingEvent
-	done := map[uuid.UUID]bool{}
-	for _, u := range st.units {
-		done[u.ID] = u.Status == wbs.WorkUnitStatusDONE
-	}
-	// The finished task.
-	if prev := st.unit; prev != nil && prev.Status != wbs.WorkUnitStatusDONE {
-		key := wbs.UnitKey(prev)
-		if pend == nil {
-			// Nothing was sent: the task is still being worked on.
-			if t := active.Find(key); t != nil {
-				return e.resumeTask(ctx, st, step, prev, t, refs)
-			}
-		}
-		archive, problem := readTaskFile(st.cwd(), wbs.ArchiveFile, false)
-		if problem != "" {
-			return e.statefileRetry(ctx, st, step, "the project manager did not archive task "+key+": "+problem, refs)
-		}
-		if t := archive.Find(key); t == nil || t.Status != wbs.TaskStatusDone {
-			return e.statefileRetry(ctx, st, step, fmt.Sprintf("task %s is not archived as DONE in %s", key, wbs.ArchiveFile), refs)
-		}
-		if t := backlog.Find(key); t == nil || t.Status != wbs.TaskStatusDone {
-			return e.statefileRetry(ctx, st, step, fmt.Sprintf("task %s is not marked DONE in %s", key, wbs.BacklogFile), refs)
-		}
-		if active.Find(key) != nil {
-			return e.statefileRetry(ctx, st, step, fmt.Sprintf("task %s is archived but still in %s", key, wbs.ActiveTaskFile), refs)
-		}
-		tx, ev, stop, err := e.finishUnit(ctx, st, step, prev)
-		if stop != nil || err != nil {
-			if err != nil {
-				return execution.StepResult{}, err
-			}
-			return *stop, nil
-		}
-		txs, events = append(txs, tx), append(events, ev)
-		done[prev.ID] = true
-	}
-	// Work the statefiles record as done but the overseer has not
-	// validated (a recreated project planned from an existing backlog) is
-	// adopted one task at a time, through the overseer's own validation.
-	deps, err := e.d.Repo.UnitDependencies(ctx, nil, st.plan.ID)
-	if err != nil {
-		return execution.StepResult{}, err
-	}
-	if u, t, problem := adoptable(st, backlog, active, done, deps); problem != "" {
-		return e.statefileRetry(ctx, st, step, problem, refs)
-	} else if u != nil {
-		return e.adoptTask(ctx, st, step, u, t, refs, txs, events)
-	}
-	// The next task.
-	switch len(active.Tasks) {
-	case 0:
-		var remaining []string
-		for _, u := range st.units {
-			if !done[u.ID] {
-				remaining = append(remaining, wbs.UnitKey(u))
-			}
-		}
-		if len(remaining) > 0 {
-			return e.statefileRetry(ctx, st, step, fmt.Sprintf("%s holds no task but %d tasks remain (%s)", wbs.ActiveTaskFile, len(remaining), strings.Join(remaining, ", ")), refs)
-		}
-		return e.advance(ctx, st, step, "PHASE_COMPLETE", advanceOpts{Refs: refs, Outcome: "PHASE_COMPLETE", SetUnit: true,
-			Tx: chainTx(txs), Events: events})
-	case 1:
-	default:
-		return e.statefileRetry(ctx, st, step, fmt.Sprintf("%s holds %d tasks; it must hold exactly one", wbs.ActiveTaskFile, len(active.Tasks)), refs)
-	}
-	t := active.Tasks[0]
-	next := byKey[t.Unit.Key]
-	switch {
-	case next == nil:
-		return e.statefileRetry(ctx, st, step, fmt.Sprintf("%s holds task %s, which is not in the active plan", wbs.ActiveTaskFile, t.Unit.Key), refs)
-	case done[next.ID]:
-		return e.statefileRetry(ctx, st, step, fmt.Sprintf("%s holds task %s, which is already DONE", wbs.ActiveTaskFile, t.Unit.Key), refs)
-	}
-	for _, d := range deps[next.ID] {
-		if !done[d] {
-			return e.statefileRetry(ctx, st, step, fmt.Sprintf("task %s was loaded before its dependencies are DONE", t.Unit.Key), refs)
-		}
-	}
-	nid := next.ID
-	txs = append(txs, func(tx persistence.Transaction) error { return e.d.Repo.ClaimUnit(ctx, tx, nid, st.rec.ID) })
-	events = append(events, pendingEvent{Type: execution.EventUnitClaimed, Payload: map[string]any{"work_unit_id": nid.String(), "sequence": next.Sequence, "name": next.Name}})
-	token := "NEXT"
-	if t.Status == wbs.TaskStatusComplete && t.AllMet() && next.Status != wbs.WorkUnitStatusPENDING && next.Status != wbs.WorkUnitStatusREADY {
-		token = "TESTED"
-		txs = append(txs, toValidating(ctx, e, nid))
-	}
-	return e.advance(ctx, st, step, token, advanceOpts{Refs: refs, Outcome: token, SetUnit: true, UnitID: &nid, Tx: chainTx(txs), Events: events})
-}
-
-// adoptable returns the first planned task the statefiles record as DONE
-// (in BACKLOG.md and TASK_ARCHIVE.md, not in ACTIVE_TASK.md) that the
-// overseer has not marked DONE and whose dependencies it has — or nil. The
-// problem is non-empty when the archive cannot be read or the archived
-// criteria no longer match the plan.
-func adoptable(st *engineState, backlog, active *wbs.TaskDoc, done map[uuid.UUID]bool, deps map[uuid.UUID][]uuid.UUID) (*wbs.WorkUnit, *wbs.Task, string) {
-	var archive *wbs.TaskDoc
-	for _, u := range st.units {
-		key := wbs.UnitKey(u)
-		if done[u.ID] || active.Find(key) != nil {
-			continue
-		}
-		if t := backlog.Find(key); t == nil || t.Status != wbs.TaskStatusDone {
-			continue
-		}
-		if archive == nil {
-			var problem string
-			if archive, problem = readTaskFile(st.cwd(), wbs.ArchiveFile, true); problem != "" {
-				return nil, nil, problem
-			}
-		}
-		t := archive.Find(key)
-		if t == nil || t.Status != wbs.TaskStatusDone {
-			continue
-		}
-		ready := true
-		for _, d := range deps[u.ID] {
-			ready = ready && done[d]
-		}
-		if !ready {
-			continue
-		}
-		var checks []wbs.AcceptanceCheckSpec
-		if u.Specification != nil {
-			checks = u.Specification.AcceptanceChecks
-		}
-		if len(t.Met) != len(checks) {
-			return nil, nil, fmt.Sprintf("task %s is DONE in %s with %d acceptance criteria; the planned task has %d", key, wbs.ArchiveFile, len(t.Met), len(checks))
-		}
-		return u, t, ""
-	}
-	return nil, nil, ""
-}
-
-// adoptTask claims a task the statefiles record as done and sends it to
-// the overseer's validation (TESTED → VALIDATE); a pass returns through
-// acceptance, which marks it DONE. Checked MANUAL criteria in the archive
-// are recorded as the tester's approvals.
-func (e *Engine) adoptTask(ctx context.Context, st *engineState, step *persistence.StepRecord, u *wbs.WorkUnit, t *wbs.Task,
-	refs persistence.StepRefs, txs []func(persistence.Transaction) error, events []pendingEvent) (execution.StepResult, error) {
-	if u.Specification != nil {
-		for i, ch := range u.Specification.AcceptanceChecks {
-			if ch.Verification == wbs.VerifyManual && t.Met[i] {
-				if err := e.d.Repo.ApproveCriterion(ctx, st.rec.ID, u.ID, i, "TESTER", "checked in "+wbs.ArchiveFile+" (adopted)"); err != nil && !errors.Is(err, persistence.ErrConflict) {
-					return execution.StepResult{}, translate(err)
-				}
-			}
-		}
-	}
-	uid := u.ID
-	txs = append(txs, func(tx persistence.Transaction) error { return e.d.Repo.ClaimUnit(ctx, tx, uid, st.rec.ID) }, toValidating(ctx, e, uid))
-	events = append(events, pendingEvent{Type: execution.EventUnitClaimed, Payload: map[string]any{"work_unit_id": uid.String(), "sequence": u.Sequence,
-		"name": u.Name, "adopted": true}})
-	if refs.Detail == nil {
-		refs.Detail = map[string]any{}
-	}
-	refs.Detail["adopted"] = wbs.UnitKey(u)
-	return e.advance(ctx, st, step, "TESTED", advanceOpts{Refs: refs, Outcome: "TESTED", SetUnit: true, UnitID: &uid, Tx: chainTx(txs), Events: events})
-}
-
-// resumeTask continues a task that is still active (a resumed execution):
-// COMPLETE goes to validation, anything else to the engineer.
-func (e *Engine) resumeTask(ctx context.Context, st *engineState, step *persistence.StepRecord, u *wbs.WorkUnit, t *wbs.Task, refs persistence.StepRefs) (execution.StepResult, error) {
-	uid := u.ID
-	txs := []func(persistence.Transaction) error{func(tx persistence.Transaction) error { return e.d.Repo.ClaimUnit(ctx, tx, uid, st.rec.ID) }}
-	token := "NEXT"
-	if t.Status == wbs.TaskStatusComplete && t.AllMet() {
-		token = "TESTED"
-		txs = append(txs, toValidating(ctx, e, uid))
-	}
-	return e.advance(ctx, st, step, token, advanceOpts{Refs: refs, Outcome: token, SetUnit: true, UnitID: &uid, Tx: chainTx(txs)})
+	return e.acceptanceResult(ctx, st, step, pend, refs)
 }
 
 // finishUnit checks the unit's passing validation, checkpoints it and

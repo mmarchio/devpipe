@@ -379,7 +379,7 @@ func (r *WebReadRepository) ProjectOverview(ctx context.Context, projectID uuid.
 		(SELECT count(*) FROM phases a WHERE a.project_id = p.id), (SELECT count(*) FROM phases a WHERE a.project_id = p.id AND a.status = 'DONE'),
 		pl.id, COALESCE(pl.version, 0), COALESCE(pl.wbs_version, 0), COALESCE(pl.status, ''), COALESCE(pl.kind, ''),
 		COALESCE(uc.done, 0), COALESCE(uc.total, 0),
-		cu.id, COALESCE(cu.unit_key, ''), COALESCE(cu.name, ''), COALESCE(cu.status, ''), COALESCE(cu.kind, ''), cu.started_at,
+		cu.id, COALESCE(cu.unit_key, ''), COALESCE(cu.name, ''), COALESCE(cu.status, ''), COALESCE(cu.kind, ''), cu.started_at, cu.completed_at,
 		COALESCE(ws.key, ''), COALESCE(ws.name, ''), COALESCE(ws.kind, ''), rs.entered_at,
 		uo.context_tokens, uo.context_window, uo.observed_at,
 		COALESCE((SELECT count(*) FROM worker_dispatches wd WHERE wd.work_unit_id = cu.id), 0),
@@ -398,7 +398,7 @@ func (r *WebReadRepository) ProjectOverview(ctx context.Context, projectID uuid.
 		&x.ExecutionStarted, &x.ExecutionComplete,
 		&x.PhaseID, &x.PhaseOrder, &x.PhaseName, &x.PhaseStatus, &x.WBSVersion, &x.PhasesTotal, &x.PhasesDone,
 		&x.PlanID, &x.PlanVersion, &x.PlanWBS, &x.PlanStatus, &x.PlanKind, &x.UnitsDone, &x.UnitsTotal,
-		&x.UnitID, &x.UnitKey, &x.UnitName, &x.UnitStatus, &x.UnitKind, &x.UnitStartedAt,
+		&x.UnitID, &x.UnitKey, &x.UnitName, &x.UnitStatus, &x.UnitKind, &x.UnitStartedAt, &x.UnitCompletedAt,
 		&x.StateKey, &x.StateName, &x.StateKind, &x.StateEntered, &x.ContextTokens, &x.ContextWindow, &x.ContextAt,
 		&x.UnitAttempts, &x.SessionID, &x.UnitWorkerResult, &x.UnitValidation, &x.UnitCheckpoint, &x.ContinuationActive)
 	if err != nil {

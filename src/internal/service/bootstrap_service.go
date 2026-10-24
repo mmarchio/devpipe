@@ -111,23 +111,27 @@ type BootstrapDeps struct {
 	Plans           bootstrapPlans
 	Units           bootstrapUnits
 
-	Runtime       persistence.RuntimeStateRepository
-	Machines      persistence.StateMachineRepository
-	States        persistence.WorkflowStateRepository
-	MachineSnaps  *StateMachineSnapshotService
-	Validation    *StateMachineValidationService
-	Assignments   persistence.StateRoleAssignmentRepository
-	Roles         persistence.RoleRepository
-	RoleSvc       *RoleService
-	Templates     persistence.PromptTemplateRepository
-	TemplateVers  persistence.PromptTemplateVersionRepository
-	Protocols     persistence.ResponseProtocolRepository
-	ProtocolFind  persistence.ResponseProtocolLookup
-	ScopeRes      *StateFileScopeResolutionService
-	StateFiles    *StateFileService
-	ActiveTask    *ActiveTaskService
-	Materialize   *StateFileMaterializeService
-	ContextSnaps  *ExecutionSnapshotService
+	Runtime      persistence.RuntimeStateRepository
+	Machines     persistence.StateMachineRepository
+	States       persistence.WorkflowStateRepository
+	MachineSnaps *StateMachineSnapshotService
+	Validation   *StateMachineValidationService
+	Assignments  persistence.StateRoleAssignmentRepository
+	Roles        persistence.RoleRepository
+	RoleSvc      *RoleService
+	Templates    persistence.PromptTemplateRepository
+	TemplateVers persistence.PromptTemplateVersionRepository
+	Protocols    persistence.ResponseProtocolRepository
+	ProtocolFind persistence.ResponseProtocolLookup
+	ScopeRes     *StateFileScopeResolutionService
+	StateFiles   *StateFileService
+	ActiveTask   *ActiveTaskService
+	Materialize  *StateFileMaterializeService
+	ContextSnaps *ExecutionSnapshotService
+	// MCPEnabled: the overseer MCP server runs (mcp.enabled). The
+	// statefile workflow's team submits every result through it, so
+	// readiness refuses that workflow without it.
+	MCPEnabled    bool
 	SnapshotsRepo persistence.ContextSnapshotRepository
 
 	Cache        *PromptCacheService
@@ -773,6 +777,13 @@ func (s *BootstrapService) readiness(g *gathered) *execution.ExecutionReadinessR
 	if g.workerProbed && g.workerProbe != nil {
 		r.Add(execution.CategoryWorkerSession, execution.CodeConfigInvalid, g.settings.WorkerProvider,
 			"worker session not ready: "+g.workerProbe.Error())
+	}
+	// MCP server (Phase 19): without it the statefile workflow's team
+	// cannot submit a result, and every command would be resent until
+	// recovery.
+	if g.machine != nil && statefileMachine(*g.machine) && !s.d.MCPEnabled {
+		r.Add(execution.CategoryMCP, execution.CodeConfigInvalid, "mcp",
+			"the statefile workflow needs the overseer MCP server: the team submits every result through it; set mcp.enabled and restart the overseer")
 	}
 	// Protocol (WBS 15.38): composition requires every prompted state to
 	// pin a response protocol (Phase 8).

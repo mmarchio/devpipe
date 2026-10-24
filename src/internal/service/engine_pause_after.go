@@ -13,8 +13,8 @@ import (
 
 // Pause after the current task (statefile workflow). The operator asks
 // for it while the execution runs; the request applies when the next task
-// is loaded into ACTIVE_TASK.md and its first IMPLEMENT is about to be
-// sent: the project pauses instead, and resuming starts work on that task.
+// is loaded and its first IMPLEMENT is about to be sent: the project
+// pauses instead, and resuming starts work on that task.
 
 // ErrPauseAfterTaskUnavailable: the execution cannot pause after its task
 // (wrapped in ErrConflict).

@@ -154,8 +154,10 @@ func TestP705DownMigration(t *testing.T) {
 	// dispatches / continuations / context snapshots — dropped first with
 	// CASCADE (accepted contract change). Phase 17 (00107-00110): the audit
 	// log and drift acknowledgements (referencing state files) drop first.
-	// Phase 18 (00112+) operational tables drop first.
-	for _, table := range []string{"execution_expected_heads", "execution_repository_identities", "dispatch_resolutions", "recovery_actions", "recovery_plans", "restore_state", "backup_records", "app_config_snapshots", "audit_events", "state_file_drift_acknowledgements", "execution_completions", "hardening_reports", "hardening_operations", "hardening_groups",
+	// Phase 18 (00112+) operational tables drop first. Phase 19 (00137+):
+	// the MCP tables reference worker dispatches / prompts and executions —
+	// dropped first (accepted contract change).
+	for _, table := range []string{"workflow_outbox", "project_state_authority", "mcp_requests", "mcp_dispatch_tokens", "task_reports", "execution_expected_heads", "execution_repository_identities", "dispatch_resolutions", "recovery_actions", "recovery_plans", "restore_state", "backup_records", "app_config_snapshots", "audit_events", "state_file_drift_acknowledgements", "execution_completions", "hardening_reports", "hardening_operations", "hardening_groups",
 		"hardening_passes", "hardening_retained_groups", "repository_checkpoints", "fix_attempts", "acceptance_approvals",
 		"validation_command_results", "validation_runs", "plan_candidates", "execution_steps", "execution_events", "execution_bootstrap_checkpoints", "execution_repository_baselines",
 		"execution_bootstrap_transitions", "execution_configuration_snapshots", "executions"} {
@@ -165,6 +167,9 @@ func TestP705DownMigration(t *testing.T) {
 	}
 	if _, err := h.DBExec(ctx, "ALTER TABLE worker_dispatches DROP COLUMN continuation_id"); err != nil {
 		t.Fatalf("down: drop worker_dispatches.continuation_id: %v", err)
+	}
+	if _, err := h.DBExec(ctx, "ALTER TABLE work_units DROP COLUMN archived_by_dispatch_id"); err != nil {
+		t.Fatalf("down: drop work_units.archived_by_dispatch_id: %v", err)
 	}
 	for _, table := range []string{"worker_result_consumptions", "continuation_transitions", "continuations",
 		"worker_result_parse_attempts", "worker_result_acceptance_claims", "worker_result_artifacts",

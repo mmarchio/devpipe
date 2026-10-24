@@ -22,7 +22,8 @@
 <section class="panel" aria-labelledby="ov-unit">
   <h2 id="ov-unit">Current Work Unit</h2>
   {{with .CurrentUnit}}<p><a href="/projects/{{$.ProjectID}}/work-units/{{.ID}}">{{.Key}} {{.Name}}</a></p>
-  <p>Overseer: {{template "badge" .Status}} · Stage: {{template "badge" (print .Stage)}}</p>{{else}}<p class="muted">No work unit in progress.</p>{{end}}
+  <p>Overseer: {{template "badge" .Status}} · Stage: {{template "badge" (print .Stage)}}</p>
+  {{with .StartedAt}}<p>Elapsed: <span class="mono" data-elapsed-since="{{rfc3339 .}}"{{with $.CurrentUnit.CompletedAt}} data-elapsed-until="{{rfc3339 .}}"{{end}}>{{elapsed . $.CurrentUnit.CompletedAt}}</span></p>{{end}}{{else}}<p class="muted">No work unit in progress.</p>{{end}}
 </section>
 <section class="panel" aria-labelledby="ov-ctx">
   <h2 id="ov-ctx">Worker Context</h2>

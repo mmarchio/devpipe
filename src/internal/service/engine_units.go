@@ -403,13 +403,6 @@ func (e *Engine) handleUnitValidation(ctx context.Context, st *engineState, step
 			return e.requireRecovery(ctx, st, step, fmt.Sprintf("%s %d times for task %s (validation runs as %s): replan the task so it can pass, then resolve",
 				reasonIdenticalFailuresPrefix, n, wbs.UnitKey(st.unit), validationUser()), ev)
 		}
-		// An adopted task (DONE in the statefiles, not in ACTIVE_TASK.md)
-		// has no engineer working on it: it is redone, not repaired.
-		if active, problem := readTaskFile(st.cwd(), wbs.ActiveTaskFile, true); problem == "" && active.Find(wbs.UnitKey(st.unit)) == nil {
-			key := wbs.UnitKey(st.unit)
-			return e.requireRecovery(ctx, st, step, fmt.Sprintf("task %s is DONE in %s but failed the overseer's validation: set it back to TODO in %s, "+
-				"remove it from %s, then resolve", key, wbs.BacklogFile, wbs.BacklogFile, wbs.ArchiveFile), ev)
-		}
 	}
 	return e.advance(ctx, st, step, token, advanceOpts{Refs: refs, Outcome: token})
 }

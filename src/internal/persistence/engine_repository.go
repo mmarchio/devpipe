@@ -336,10 +336,6 @@ type EngineRepository interface {
 	ListFixAttempts(ctx context.Context, executionID uuid.UUID, target *uuid.UUID) ([]*FixAttemptRecord, error)
 	ApproveCriterion(ctx context.Context, executionID, unitID uuid.UUID, index int, by, note string) error
 	Approvals(ctx context.Context, ex Executor, unitID uuid.UUID) (map[int]bool, error)
-	// RecordStatefileHash stores the MD5 of a verified statefile and
-	// returns the hash it replaces ("" when the file was not verified
-	// before in the execution).
-	RecordStatefileHash(ctx context.Context, executionID uuid.UUID, path, md5 string) (string, error)
 
 	// Checkpoints (P16-73).
 	CreateCheckpointIntent(ctx context.Context, rec *RepoCheckpointRecord) (*RepoCheckpointRecord, error)

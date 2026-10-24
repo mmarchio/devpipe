@@ -42,7 +42,7 @@ type templateDef struct {
 // failing the same way (VALIDATE → REPLAN → REPLAN_CHECK → IMPLEMENT).
 // Projects created earlier keep the workflow they copied.
 var statefileTemplate = templateDef{name: "Statefile Development Workflow v3",
-	description: "Command-driven development workflow over <working directory>/statefiles",
+	description: "Command-driven development workflow; the team reports through the overseer MCP server",
 	states:      defaultStateSpecs, transitions: defaultTransitionSpecs}
 
 // composedTemplate is the earlier composed-prompt workflow (WBS 6.3),
@@ -102,8 +102,8 @@ type transitionSpec struct {
 
 // defaultStateSpecs enumerates the statefile workflow's states. Each
 // action state sends one command (a CMD_ template rendered as is); the
-// team works in <working directory>/statefiles and the *_CHECK control
-// states read those files back to decide the transition.
+// team submits its result through the overseer MCP server and the *_CHECK
+// control states read it back to decide the transition.
 func defaultStateSpecs() []stateSpec {
 	return []stateSpec{
 		{key: "PROJECT_INIT", kind: state.KindControl},
@@ -112,7 +112,7 @@ func defaultStateSpecs() []stateSpec {
 		// picks the work (plan / accept / validate).
 		{key: "SKILL", kind: state.KindAction, template: "CMD_SKILL"},
 		{key: "ROUTE", kind: state.KindControl},
-		// "plan phase <N>": ARCHITECT → PLAN.md, PLANNER → BACKLOG.md.
+		// "plan phase <N>": ARCHITECT and PLANNER submit the phase plan.
 		{key: "PLAN", kind: state.KindAction, template: "CMD_PLAN"},
 		{key: "PLAN_CHECK", kind: state.KindControl},
 		// PROJECT_MANAGER: archive the finished task, load the next one.

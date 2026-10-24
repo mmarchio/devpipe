@@ -22,6 +22,7 @@ var categoryLabels = map[ReadinessCategory]string{
 	CategoryWorker:             "Worker provider",
 	CategoryCompressionSession: "Compression session ready",
 	CategoryWorkerSession:      "Worker session ready",
+	CategoryMCP:                "MCP server",
 	CategoryProtocol:           "Response protocol",
 	CategoryContext:            "Context configuration",
 	CategoryContinuation:       "Continuation policy",

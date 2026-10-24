@@ -332,7 +332,7 @@ func (s *ConsoleReadService) Overview(ctx context.Context, projectID uuid.UUID) 
 		ContinuationInFlight: x.ContinuationActive}
 	if x.UnitID != nil {
 		o.CurrentUnit = &readmodel.UnitRef{ID: x.UnitID.String(), Key: x.UnitKey, Name: x.UnitName, Status: x.UnitStatus, Kind: x.UnitKind,
-			Stage: readmodel.StageOf(facts)}
+			Stage: readmodel.StageOf(facts), StartedAt: x.UnitStartedAt, CompletedAt: x.UnitCompletedAt}
 		// A DONE unit is not a current task (between units).
 		if x.UnitStatus != "DONE" {
 			o.CurrentTask = &readmodel.CurrentTask{UnitID: x.UnitID.String(), Key: x.UnitKey, Name: x.UnitName, Status: x.UnitStatus,

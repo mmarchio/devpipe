@@ -122,6 +122,10 @@ type UnitRef struct {
 	Status string    `json:"status"`
 	Kind   string    `json:"kind"`
 	Stage  UnitStage `json:"stage"`
+	// StartedAt / CompletedAt bound the unit's elapsed time (CompletedAt
+	// nil while it is in progress).
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 // RuntimeRef is the runtime workflow position.

@@ -634,8 +634,9 @@ func TestP1520Events(t *testing.T) {
 	// repository types (P18-41: HEAD accepted, worker-run evidence) + the
 	// task replan + the task requeue (requested, applied) + the task
 	// analysis / fix (started, finished each) + the repeated action + pause
-	// after task (requested, cancelled, applied).
-	if len(AllEventTypes()) != 56 {
+	// after task (requested, cancelled, applied) + 7 MCP types and the
+	// state-authority cutover (Phase 19).
+	if len(AllEventTypes()) != 64 {
 		t.Fatalf("%d types", len(AllEventTypes()))
 	}
 	if _, err := ParseEventType("NOPE"); err == nil {

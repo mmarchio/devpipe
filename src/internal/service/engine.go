@@ -77,6 +77,11 @@ type EngineDeps struct {
 	ContextSnaps *ExecutionSnapshotService
 	Cache        *PromptCacheService
 	Worker       *WorkerService
+	// MCP stores the overseer MCP server's records (Phase 19). The
+	// statefile workflow's results are read from it: without it no
+	// command of that workflow can be prepared.
+	MCP         persistence.MCPRepository
+	MCPTokenTTL time.Duration
 	// Recovery stores operator delivery resolutions (Phase 18; nil =
 	// none are applied).
 	Recovery      persistence.RecoveryStore
@@ -121,6 +126,7 @@ type CommandPromptWriter interface {
 // Engine is the WBS 16.1 execution engine.
 type Engine struct {
 	d     EngineDeps
+	mcp   *MCPService
 	files derivedFileWriter
 	locks sync.Map
 	// stepHook is a test seam run after the intent is committed and before
@@ -162,6 +168,9 @@ func NewEngine(d EngineDeps) *Engine {
 		d.Logger = slog.Default()
 	}
 	e := &Engine{d: d}
+	if d.MCP != nil {
+		e.mcp = NewMCPService(e, d.MCP, d.MCPTokenTTL)
+	}
 	if d.MaxValidations > 0 {
 		e.validations = make(chan struct{}, d.MaxValidations)
 	}
@@ -170,6 +179,9 @@ func NewEngine(d EngineDeps) *Engine {
 	}
 	return e
 }
+
+// MCP returns the MCP service (nil when no MCP repository is wired).
+func (e *Engine) MCP() *MCPService { return e.mcp }
 
 // SetStepHook installs the test seam: stage is "intent" (after the intent
 // commit) or an action-specific point ("dispatch", "validation",

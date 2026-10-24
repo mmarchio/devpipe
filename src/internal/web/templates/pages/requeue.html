@@ -4,7 +4,7 @@
 <h1>Requeue task</h1>
 {{if $t}}<p>Task <strong>{{$t.Key}} {{$t.Name}}</strong> restarts from the beginning.</p>{{else}}<p class="muted">The execution has no active task to requeue.</p>{{end}}
 <div class="banner warn"><strong>! Restarts the task</strong>
-Requeueing stops the task's execution, clears the worker context (a new session) and <span class="mono">statefiles/ACTIVE_TASK.md</span>, resets the task to TODO with its acceptance criteria unchecked in <span class="mono">statefiles/BACKLOG.md</span>, resets its fix and retry counters, and sends the project manager to load it again. Code changes already made in the repository are kept. A worker command that is already running is not interrupted: the requeue then applies as soon as it finishes.</div>
+Requeueing stops the task's execution, clears the worker context (a new session), resets the task with its manual approvals withdrawn, resets its fix and retry counters, and returns the workflow to acceptance, where the overseer loads it again. Code changes already made in the repository are kept. A worker command that is already running is not interrupted: the requeue then applies as soon as it finishes.</div>
 <form method="post" action="/projects/{{.Shell.Project.ID}}/requeue">
 {{template "csrf" .Shell.CSRF}}
 <div class="field"><label for="reason">Reason</label><input id="reason" type="text" name="reason" required maxlength="2000"></div>

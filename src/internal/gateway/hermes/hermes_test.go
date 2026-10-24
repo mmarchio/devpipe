@@ -269,7 +269,8 @@ func TestP1232ChatCompletionsWire(t *testing.T) {
 	if strings.Join(paths, ",") != "GET /v1/models,POST /v1/chat/completions,POST /v1/chat/completions,POST /v1/chat/completions" {
 		t.Fatalf("paths %v", paths)
 	}
-	if cd, _ := json.Marshal(calls[1].body["messages"]); string(cd) != `[{"content":"change working directory to /repos/a","role":"user"}]` {
+	cdMsg, _ := json.Marshal(hermes.ChangeDirectoryOnlyPrompt("/repos/a"))
+	if cd, _ := json.Marshal(calls[1].body["messages"]); string(cd) != `[{"content":`+string(cdMsg)+`,"role":"user"}]` {
 		t.Fatalf("session start prompt %s", cd)
 	}
 	last := calls[3]
@@ -281,7 +282,7 @@ func TestP1232ChatCompletionsWire(t *testing.T) {
 		t.Fatalf("body %v", last.body)
 	}
 	got, _ := json.Marshal(last.body["messages"])
-	want := `[{"content":"change working directory to /repos/a","role":"user"},{"content":"reply 2","role":"assistant"},{"content":"change working directory to /repos/a\n\nfirst","role":"user"},{"content":"reply 3","role":"assistant"},{"content":"change working directory to /repos/a\n\nsecond","role":"user"}]`
+	want := `[{"content":` + string(cdMsg) + `,"role":"user"},{"content":"reply 2","role":"assistant"},{"content":"change working directory to /repos/a\n\nfirst","role":"user"},{"content":"reply 3","role":"assistant"},{"content":"change working directory to /repos/a\n\nsecond","role":"user"}]`
 	if string(got) != want {
 		t.Fatalf("messages\n got %s\nwant %s", got, want)
 	}

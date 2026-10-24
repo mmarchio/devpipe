@@ -28,7 +28,8 @@ func (s *sfTeam) countCmd(cmd string) int {
 // engineer gets the task again instead of an immediate second recovery.
 func TestP19FixLimitResetOnRecovery(t *testing.T) {
 	r := p16NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}, alwaysFail: "A"}
+	team := newSFTeam(t, r)
+	team.alwaysFail = "A"
 	r.g.Responder = team.respond
 	r.runUntil(t, execution.StepRecoveryRequired, 200)
 	if reason := r.recoveryReason(t); reason != "fix attempts exhausted" {
@@ -56,12 +57,13 @@ func TestP19FixLimitResetOnRecovery(t *testing.T) {
 	}
 }
 
-// Resolving a statefile-resend limit recovery resets the counter: a file
+// Resolving a result-resend limit recovery resets the counter: a result
 // still wrong after the resolution gets a resend with the problem again,
 // not an immediate second recovery.
 func TestP19StatefileResendLimitResetOnRecovery(t *testing.T) {
 	r := p16NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}, keepBadActive: true}
+	team := newSFTeam(t, r)
+	team.rejectAcceptance = true
 	r.g.Responder = team.respond
 	r.runUntil(t, execution.StepRecoveryRequired, 200)
 	if reason := r.recoveryReason(t); !strings.Contains(reason, "(still wrong after 3 resends with the problem)") {
@@ -69,7 +71,7 @@ func TestP19StatefileResendLimitResetOnRecovery(t *testing.T) {
 	}
 	before := team.countCmd("have the project manager perform acceptance tasks")
 	team.mu.Lock()
-	team.keepBadActive, team.fixActive = false, true
+	team.rejectAcceptance = false
 	team.mu.Unlock()
 	if _, err := r.eng().ResolveRecovery(context.Background(), r.pid, r.execID, service.RecoveryResolution{Action: service.RecoveryResume}); err != nil {
 		t.Fatal(err)
@@ -90,7 +92,7 @@ func TestP19StatefileResendLimitResetOnRecovery(t *testing.T) {
 // (RETRY → SKILL) before any work is routed; the run then completes.
 func TestP19SkillCommandResent(t *testing.T) {
 	r := p16NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}}
+	team := newSFTeam(t, r)
 	failed := false
 	r.g.Responder = func(m hermestest.Message) *hermestest.Behavior {
 		if first, _, _ := strings.Cut(m.Content, "\n"); !failed && strings.HasSuffix(first, "-output-format skill") {
@@ -116,12 +118,13 @@ func TestP19SkillCommandResent(t *testing.T) {
 	}
 }
 
-// A test command answered without recording anything in ACTIVE_TASK.md
-// is resent to the tester with the problem; the engineer does not get the
-// working task again.
+// A test command answered without submitting its result is resent to the
+// tester with the problem; the engineer does not get the working task
+// again.
 func TestP19UnrecordedTestResent(t *testing.T) {
 	r := p16NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}, silentTests: 1}
+	team := newSFTeam(t, r)
+	team.silentTests = 1
 	r.g.Responder = team.respond
 	res, err := r.eng().Run(context.Background(), r.execID, 200)
 	if err != nil {
@@ -138,8 +141,7 @@ func TestP19UnrecordedTestResent(t *testing.T) {
 	}
 	team.mu.Lock()
 	defer team.mu.Unlock()
-	if len(team.resends) != 1 || !strings.HasPrefix(team.resends[0], "test task A\n\nThe statefiles you wrote for this command were rejected: the tester did not record the test result: statefiles/ACTIVE_TASK.md is unchanged") ||
-		!strings.Contains(team.resends[0], "Expected format:") {
+	if len(team.resends) != 1 || !strings.HasPrefix(team.resends[0], "test task A\n\nThe result of this command was rejected: no TEST result was submitted for the command") {
 		t.Fatalf("resends %q", team.resends)
 	}
 }
@@ -150,7 +152,8 @@ func TestP19UnrecordedTestResent(t *testing.T) {
 // implements it, and it passes.
 func TestP19RepeatedFailureReplansTask(t *testing.T) {
 	r := p16NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}, replanCheck: "A2", replanNoopFirst: true}
+	team := newSFTeam(t, r)
+	team.replanCheck, team.replanNoopFirst = "A2", true
 	r.g.Responder = team.respond
 	r.setCheck(t, "A", 1) // the original validation can never pass
 	res, err := r.eng().Run(context.Background(), r.execID, 300)
@@ -168,7 +171,7 @@ func TestP19RepeatedFailureReplansTask(t *testing.T) {
 	}
 	first := replans[0]
 	for _, want := range []string{"have the architect replan task A\n", "failed the overseer's validation the same way 3 times", "check A failed: expected behaviour missing",
-		"Expected format:"} {
+		"keep its key, kind and dependencies"} {
 		if !strings.Contains(first, want) {
 			t.Fatalf("replan command lacks %q:\n%s", want, first)
 		}

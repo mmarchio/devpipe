@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,24 +14,24 @@ import (
 	"overseer/internal/execution"
 	"overseer/internal/gateway/hermes/hermestest"
 	"overseer/internal/service"
-	"overseer/internal/wbs"
 )
 
 // taskOpsRig drives a statefile execution into recovery on task A: the
-// tester never records its result, so the test command repeats; the
+// tester never submits its result, so the test command repeats; the
 // overseer's automatic analysis and requeue does not help (ops answer
 // only from recovery on), and the repeat after it needs recovery.
-func taskOpsRig(t *testing.T, ops func(m hermestest.Message) *hermestest.Behavior) (*p17Rig, *sfTeam) {
+func taskOpsRig(t *testing.T, ops func(m hermestest.Message, team *sfTeam) *hermestest.Behavior) (*p17Rig, *sfTeam) {
 	t.Helper()
 	r := p17NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}, silentTests: 10}
+	team := newSFTeam(t, r.p16Rig)
+	team.silentTests = 10
 	var armed atomic.Bool
 	r.g.Responder = requeueAware(team, func(m hermestest.Message) *hermestest.Behavior {
 		if armed.Load() {
-			return ops(m)
+			return ops(m, team)
 		}
 		if strings.HasPrefix(m.Content, "analyze task ") {
-			return replyWith("nothing to change") // no analysis written: nothing to fix
+			return replyWith("nothing to change") // no analysis submitted: nothing to fix
 		}
 		return nil
 	})
@@ -43,7 +41,7 @@ func taskOpsRig(t *testing.T, ops func(m hermestest.Message) *hermestest.Behavio
 		t.Fatalf("never reached recovery: %s (%s)", r.state(t), team.commandLines())
 	}
 	team.mu.Lock()
-	team.silentTests = 0 // the tester records results from now on
+	team.silentTests = 0 // the tester submits results from now on
 	team.mu.Unlock()
 	return r, team
 }
@@ -88,6 +86,12 @@ func waitTaskOps(t *testing.T, r *p17Rig) service.TaskOpsView {
 
 func replyWith(s string) *hermestest.Behavior { return &hermestest.Behavior{Content: &s} }
 
+// fixableAnalysis is an ANALYSIS result that found an optimization.
+func fixableAnalysis() map[string]any {
+	return map[string]any{"status": "COMPLETE", "summary": "analyzed", "evidence": map[string]any{"fixable": true,
+		"findings": []any{"The tester never records the result."}, "optimizations": []any{"Narrow the objective so the test result is recorded."}}}
+}
+
 // TestP19TaskAnalyzeAndFix — on the recovery screen the architect analyzes
 // task A (Fix stays disabled until optimizations are found), then fixes
 // it: the rewritten definition is adopted, the attempt counters reset, the
@@ -95,21 +99,20 @@ func replyWith(s string) *hermestest.Behavior { return &hermestest.Behavior{Cont
 func TestP19TaskAnalyzeAndFix(t *testing.T) {
 	var analyses, fixes []string
 	slow := make(chan struct{})
-	r, _ := taskOpsRig(t, func(m hermestest.Message) *hermestest.Behavior {
+	r, _ := taskOpsRig(t, func(m hermestest.Message, team *sfTeam) *hermestest.Behavior {
 		switch {
 		case strings.HasPrefix(m.Content, "analyze task A"):
 			analyses = append(analyses, m.Content)
 			<-slow // held until the test checked the running state
-			_ = os.WriteFile(filepath.Join(m.Dir, wbs.AnalysisFile), []byte("# Task analysis — A\n\nTask: A\nFixable: yes\n\n"+
-				"## Findings\n- The tester never records the result.\n\n## Optimizations\n- Narrow the objective so the test result is recorded.\n"), 0o644)
-			return replyWith("analysis written")
+			team.submitFor(m, fixableAnalysis())
+			return replyWith("analysis submitted")
 		case strings.HasPrefix(m.Content, "fix task A"):
 			fixes = append(fixes, m.Content)
-			for _, rel := range []string{wbs.BacklogFile, wbs.ActiveTaskFile} {
-				p := filepath.Join(m.Dir, rel)
-				b, _ := os.ReadFile(p)
-				_ = os.WriteFile(p, []byte(strings.Replace(string(b), "Deliver A.", "Deliver A, with the test result recorded.", 1)), 0o644)
-			}
+			team.mu.Lock()
+			unit := team.unit(*team.find("A"))
+			team.mu.Unlock()
+			unit["objective"] = "Deliver A, with the test result recorded."
+			team.submitFor(m, map[string]any{"status": "COMPLETE", "summary": "objective narrowed", "plan": map[string]any{"units": []any{unit}}})
 			return replyWith("objective narrowed")
 		}
 		return nil
@@ -118,7 +121,7 @@ func TestP19TaskAnalyzeAndFix(t *testing.T) {
 	b := r.b
 	page := "/projects/" + r.pid.String() + "/executions/" + r.execID.String() + "/recovery"
 
-	// Only the overseer's automatic analysis (no analysis written) so far:
+	// Only the overseer's automatic analysis (none submitted) so far:
 	// Analyze enabled, Fix disabled.
 	v := taskOpsOf(t, r)
 	if !v.Available || v.Task != "A" || v.FixEnabled || v.Analysis == nil || v.Analysis.Error == "" {
@@ -145,8 +148,8 @@ func TestP19TaskAnalyzeAndFix(t *testing.T) {
 		len(v.Analysis.Optimizations) != 1 || v.Analysis.Findings[0] != "The tester never records the result." {
 		t.Fatalf("after analysis %+v %+v", v, v.Analysis)
 	}
-	if len(analyses) != 1 || !strings.Contains(analyses[0], "Recovery reason: ") || !strings.Contains(analyses[0], wbs.PlanFile) ||
-		!strings.Contains(analyses[0], wbs.WBSFile(1)) || !strings.Contains(analyses[0], wbs.AnalysisFile) {
+	if len(analyses) != 1 || !strings.Contains(analyses[0], "Recovery reason: ") || !strings.Contains(analyses[0], "get_task") ||
+		!strings.Contains(analyses[0], "get_context") || !strings.Contains(analyses[0], "fixable: true|false") {
 		t.Fatalf("analysis command: %q", analyses)
 	}
 	if html := b.mustPage(page); !strings.Contains(html, "Optimizations found") || strings.Contains(html, " disabled>Fix task</button>") {
@@ -161,7 +164,7 @@ func TestP19TaskAnalyzeAndFix(t *testing.T) {
 	if v.Fix == nil || !v.Fix.Success || !v.Fix.DefinitionChanged || v.FixEnabled {
 		t.Fatalf("after fix %+v %+v", v, v.Fix)
 	}
-	if len(fixes) != 1 || !strings.Contains(fixes[0], wbs.AnalysisFile) {
+	if len(fixes) != 1 || !strings.Contains(fixes[0], "get_execution_history") {
 		t.Fatalf("fix command: %q", fixes)
 	}
 	if html := b.mustPage(page); !strings.Contains(textOf(html), "Fix succeeded") {
@@ -196,16 +199,18 @@ func TestP19TaskAnalyzeAndFix(t *testing.T) {
 	}
 }
 
-// TestP19TaskAnalysisNotFixable — an analysis without optimizations (or a
-// missing analysis file) leaves Fix disabled; the API refuses a fix.
+// TestP19TaskAnalysisNotFixable — an analysis without optimizations (or
+// none submitted) leaves Fix disabled; the API refuses a fix.
 func TestP19TaskAnalysisNotFixable(t *testing.T) {
-	writeFile := true
-	r, _ := taskOpsRig(t, func(m hermestest.Message) *hermestest.Behavior {
+	var submit atomic.Bool
+	submit.Store(true)
+	r, _ := taskOpsRig(t, func(m hermestest.Message, team *sfTeam) *hermestest.Behavior {
 		if strings.HasPrefix(m.Content, "analyze task A") {
-			if writeFile {
-				_ = os.WriteFile(filepath.Join(m.Dir, wbs.AnalysisFile), []byte("# Task analysis — A\n\nTask: A\nFixable: no\n\n## Findings\n- Needs a human decision.\n"), 0o644)
+			if submit.Load() {
+				team.submitFor(m, map[string]any{"status": "COMPLETE", "summary": "not fixable",
+					"evidence": map[string]any{"fixable": false, "findings": []any{"Needs a human decision."}}})
 			}
-			return replyWith("analysis written")
+			return replyWith("analysis done")
 		}
 		return nil
 	})
@@ -223,26 +228,27 @@ func TestP19TaskAnalysisNotFixable(t *testing.T) {
 	if code, raw := r.b.api(http.MethodPost, api+"fix", nil); code != http.StatusConflict {
 		t.Fatalf("fix of a not fixable analysis: %d %s", code, raw)
 	}
-	// The architect writes nothing: the analysis reports why.
-	writeFile = false
+	// The architect submits nothing: the analysis reports why.
+	submit.Store(false)
 	if code, raw := r.b.api(http.MethodPost, api+"analyze", nil); code != http.StatusAccepted {
 		t.Fatalf("analyze again: %d %s", code, raw)
 	}
 	v = waitTaskOps(t, r)
-	if v.Analysis == nil || v.FixEnabled || !strings.Contains(v.Analysis.Error, "did not write the analysis") {
+	if v.Analysis == nil || v.FixEnabled || !strings.Contains(v.Analysis.Error, "did not submit the analysis") {
 		raw, _ := json.Marshal(v)
-		t.Fatalf("missing analysis file: %s", raw)
+		t.Fatalf("missing analysis: %s", raw)
 	}
 }
 
-// TestP19RepeatedActionIntervention — the tester's result is not recorded
+// TestP19RepeatedActionIntervention — the tester's result is not submitted
 // three times in a row, so the overseer would send TEST a fourth time:
 // instead it pauses, has the architect analyze and fix task A, requeues it
 // and resumes, and the execution completes. The overview offers Analyze
 // and Fix task, disabled while the execution runs.
 func TestP19RepeatedActionIntervention(t *testing.T) {
 	r := p17NewRigWith(t, p16Options{statefile: true})
-	team := &sfTeam{t: t, dir: r.dir, script: r.script, tested: map[string]int{}, silentTests: 3}
+	team := newSFTeam(t, r.p16Rig)
+	team.silentTests = 3
 	var analyses, fixes []string
 	var mu sync.Mutex
 	r.g.Responder = requeueAware(team, func(m hermestest.Message) *hermestest.Behavior {
@@ -251,11 +257,11 @@ func TestP19RepeatedActionIntervention(t *testing.T) {
 		switch {
 		case strings.HasPrefix(m.Content, "analyze task A"):
 			analyses = append(analyses, m.Content)
-			_ = os.WriteFile(filepath.Join(m.Dir, wbs.AnalysisFile), []byte("# Task analysis — A\n\nTask: A\nFixable: yes\n\n"+
-				"## Findings\n- The tester never records the result.\n\n## Optimizations\n- Narrow the objective so the test result is recorded.\n"), 0o644)
-			return replyWith("analysis written")
+			team.submitFor(m, fixableAnalysis())
+			return replyWith("analysis submitted")
 		case strings.HasPrefix(m.Content, "fix task A"):
 			fixes = append(fixes, m.Content)
+			team.submitFor(m, map[string]any{"status": "COMPLETE", "summary": "tests adjusted"})
 			return replyWith("tests adjusted")
 		}
 		return nil

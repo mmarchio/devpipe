@@ -25,16 +25,19 @@ const (
 	// compression provider serves the configured model.
 	CategoryWorkerSession      ReadinessCategory = "worker_session"
 	CategoryCompressionSession ReadinessCategory = "compression_session"
-	CategoryProtocol           ReadinessCategory = "response_protocol"
-	CategoryContext            ReadinessCategory = "context_configuration"
-	CategoryContinuation       ReadinessCategory = "continuation_configuration"
+	// CategoryMCP: the overseer MCP server the statefile workflow's team
+	// reports through runs.
+	CategoryMCP          ReadinessCategory = "mcp_server"
+	CategoryProtocol     ReadinessCategory = "response_protocol"
+	CategoryContext      ReadinessCategory = "context_configuration"
+	CategoryContinuation ReadinessCategory = "continuation_configuration"
 )
 
 var categoryOrder = []ReadinessCategory{
 	CategoryProject, CategoryWorkingDir, CategoryRepository, CategoryPhase, CategoryWBS,
 	CategoryStateMachine, CategoryRoles, CategoryRoleInstr, CategoryStateInstr, CategoryStateFiles,
 	CategoryTemplates, CategoryCompression, CategoryCompressionSession, CategoryWorker, CategoryWorkerSession,
-	CategoryProtocol, CategoryContext, CategoryContinuation,
+	CategoryMCP, CategoryProtocol, CategoryContext, CategoryContinuation,
 }
 
 // Categories returns every category in report order.

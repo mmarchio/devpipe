@@ -18,7 +18,6 @@ import (
 	"overseer/internal/execution"
 	"overseer/internal/persistence"
 	"overseer/internal/wbs"
-	"overseer/internal/worker"
 )
 
 // ---------------------------------------------------------------------------
@@ -134,7 +133,7 @@ func validationUser() string {
 
 // replanContext is what the replan command carries: the repeated failure,
 // where and how the overseer validates, and what the architect may change.
-func (e *Engine) replanContext(ctx context.Context, st *engineState, format worker.ResponseFormat) (string, error) {
+func (e *Engine) replanContext(ctx context.Context, st *engineState) (string, error) {
 	if st.unit == nil {
 		return "", nil
 	}
@@ -164,17 +163,14 @@ func (e *Engine) replanContext(ctx context.Context, st *engineState, format work
 			}
 		}
 	}
-	fmt.Fprintf(&b, "\nReplan task %s so it can succeed under that validation: rewrite its section in %s and %s (Status: ACTIVE, criteria unchecked). "+
-		"You may change its objective, instructions, acceptance criteria, required tests and validation commands (for example, a test that relies on "+
-		"something the overseer's environment does not provide); keep its key, kind and dependencies. The ENGINEER implements the replanned task next.",
-		key, wbs.BacklogFile, wbs.ActiveTaskFile)
-	b.WriteString(expectedFormat(format))
+	fmt.Fprintf(&b, "\nReplan task %s so it can succeed under that validation. You may change its objective, instructions, acceptance "+
+		"criteria, required tests and validation commands (for example, a test that relies on something the overseer's environment does not "+
+		"provide); keep its key, kind and dependencies. The ENGINEER implements the replanned task next.", key)
 	return feedback(b.String()), nil
 }
 
-// handleReplanCheck reads the ARCHITECT's replanned task: the same section
-// in BACKLOG.md and ACTIVE_TASK.md, the same key, kind and dependencies,
-// valid under the plan checks and actually changed. The stored definition
+// handleReplanCheck reads the ARCHITECT's replanned task: the same key,
+// kind and dependencies, valid under the plan checks and actually changed. The stored definition
 // is replaced, the task's attempt counters reset, and the ENGINEER gets
 // the task (REPLANNED → IMPLEMENT). Anything else is resent to the
 // architect with the problem.
@@ -194,7 +190,7 @@ func (e *Engine) handleReplanCheck(ctx context.Context, st *engineState, step *p
 		return *stop, nil
 	}
 	key := wbs.UnitKey(st.unit)
-	spec, changed, problem, err := e.replannedTask(ctx, st)
+	spec, changed, problem, err := e.replannedTask(ctx, st, pend)
 	if err != nil {
 		return execution.StepResult{}, err
 	}
@@ -223,31 +219,18 @@ func (e *Engine) handleReplanCheck(ctx context.Context, st *engineState, step *p
 		Events: []pendingEvent{ev}})
 }
 
-// replannedTask reads the current task as the team rewrote it: the same
-// section in BACKLOG.md and ACTIVE_TASK.md, the same key, kind and
-// dependencies, valid under the plan checks. It returns the parsed
-// definition and whether it differs from the stored one; problem is
-// non-empty when the files do not hold an acceptable rewrite.
-func (e *Engine) replannedTask(ctx context.Context, st *engineState) (*wbs.WorkUnitSpecification, bool, string, error) {
+// replannedTask reads the current task as the team rewrote it: the task
+// submitted for the dispatch (a fix may submit none: the definition is
+// unchanged), with the same key, kind and dependencies, valid under the
+// plan checks. It returns the parsed definition and whether it differs
+// from the stored one; problem is non-empty when the result does not hold
+// an acceptable rewrite.
+func (e *Engine) replannedTask(ctx context.Context, st *engineState, dispatchID *uuid.UUID) (*wbs.WorkUnitSpecification, bool, string, error) {
 	key := wbs.UnitKey(st.unit)
-	t, problem := e.activeTask(st)
-	if problem != "" {
-		return nil, false, problem, nil
+	u, ok, problem, err := e.replannedUnit(ctx, st, dispatchID)
+	if err != nil || problem != "" || !ok {
+		return nil, false, problem, err
 	}
-	backlog, problem := readTaskFile(st.cwd(), wbs.BacklogFile, false)
-	if problem != "" {
-		return nil, false, problem, nil
-	}
-	bt := backlog.Find(key)
-	if bt == nil {
-		return nil, false, fmt.Sprintf("task %s is missing from %s", key, wbs.BacklogFile), nil
-	}
-	a, _ := json.Marshal(t.Unit)
-	bb, _ := json.Marshal(bt.Unit)
-	if string(a) != string(bb) {
-		return nil, false, fmt.Sprintf("%s and %s must hold the same replanned task %s", wbs.BacklogFile, wbs.ActiveTaskFile, key), nil
-	}
-	u := t.Unit
 	deps, err := e.d.Repo.UnitDependencies(ctx, nil, st.plan.ID)
 	if err != nil {
 		return nil, false, "", err

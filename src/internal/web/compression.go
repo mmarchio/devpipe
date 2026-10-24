@@ -448,7 +448,11 @@ func (a *compressionAPI) lineage(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, compressionServiceError(err))
 		return
 	}
-	var compressedID, acceptedID *string
+	var compressedID, acceptedID, canonicalID, canonicalHash, snapshotID *string
+	if l.Canonical != nil {
+		id, hash, snap := l.Canonical.ID.String(), l.Canonical.Hash, l.ContextSnapshotID.String()
+		canonicalID, canonicalHash, snapshotID = &id, &hash, &snap
+	}
 	if l.CompressedPrompt != nil {
 		s := l.CompressedPrompt.ID.String()
 		compressedID = &s
@@ -463,9 +467,9 @@ func (a *compressionAPI) lineage(w http.ResponseWriter, r *http.Request) {
 		"accepted_attempt_id":  acceptedID,
 		"run":                  toRunDTO(l.Run),
 		"attempts":             toAttemptDTOs(l.Attempts, l.Run),
-		"canonical_prompt_id":  l.Canonical.ID.String(),
-		"canonical_hash":       l.Canonical.Hash,
-		"context_snapshot_id":  l.ContextSnapshotID.String(),
+		"canonical_prompt_id":  canonicalID,
+		"canonical_hash":       canonicalHash,
+		"context_snapshot_id":  snapshotID,
 	})
 }
 

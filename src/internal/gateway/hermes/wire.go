@@ -39,6 +39,18 @@ func ChangeDirectoryPrompt(path string) string {
 	return "change working directory to " + path
 }
 
+// ChangeDirectoryOnlySuffix follows the path in the standalone "cd"
+// exchange: alone, the line is not a command, and an agent left to
+// interpret it in a project full of statefiles starts working through the
+// backlog unsupervised (no dispatch, no task, the session busy).
+const ChangeDirectoryOnlySuffix = " — only change the directory and reply with it; do not read, run or change anything else and do not start any task: wait for the next command"
+
+// ChangeDirectoryOnlyPrompt is the standalone "cd" exchange's prompt
+// (ChangeDirectoryPrompt plus ChangeDirectoryOnlySuffix, one line).
+func ChangeDirectoryOnlyPrompt(path string) string {
+	return ChangeDirectoryPrompt(path) + ChangeDirectoryOnlySuffix
+}
+
 // ChatMessage is one chat completions message.
 type ChatMessage struct {
 	Role    string `json:"role"`

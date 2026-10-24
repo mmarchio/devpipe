@@ -45,8 +45,10 @@ type p16Options struct {
 	// noBootstrap leaves the project READY (tests that bootstrap later).
 	noBootstrap bool
 	// statefile runs the default statefile workflow instead of the
-	// composed-prompt workflow.
+	// composed-prompt workflow (with the MCP server the team reports
+	// through enabled, unless noMCP).
 	statefile bool
+	noMCP     bool
 }
 
 func p16NewRig(t *testing.T) *p16Rig { return p16NewRigWith(t, p16Options{}) }
@@ -57,7 +59,17 @@ func p16NewRigWith(t *testing.T, o p16Options) *p16Rig {
 	if phases == nil {
 		phases = []p15Phase{{1, "Foundation", "PENDING", 1}}
 	}
-	h, g, srv := p15Harness(t, o.config)
+	cfg := o.config
+	if o.statefile && !o.noMCP {
+		mcp := p19mcpConfig(t)
+		cfg = func(c *config.Config) {
+			if o.config != nil {
+				o.config(c)
+			}
+			mcp(c)
+		}
+	}
+	h, g, srv := p15Harness(t, cfg)
 	base := p15BuildWorkflow(t, h, g, srv, phases, o.statefile)
 	r := &p16Rig{p15Rig: base}
 	p16Configure(t, r, o)

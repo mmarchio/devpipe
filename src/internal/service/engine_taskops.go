@@ -11,22 +11,19 @@ import (
 
 	"github.com/google/uuid"
 
-	"overseer/internal/compression"
 	"overseer/internal/execution"
 	"overseer/internal/persistence"
 	"overseer/internal/wbs"
-	"overseer/internal/worker"
 )
 
 // Task analysis and fix from the recovery screen and the project overview.
 // While an execution is in RECOVERY_REQUIRED or PAUSED with a current task
-// (statefile workflow), the operator can have the ARCHITECT analyze the task — its definition in
-// ACTIVE_TASK.md, what PLAN.md and the phase WBS say about it, its tests
-// and validation, and the recovery reason — for optimizations that remove
-// the cause of the recovery. The analysis is written to
-// statefiles/TASK_ANALYSIS.md and parsed by the overseer; when it lists
-// optimizations, the operator can have the ARCHITECT implement them (the
-// task definition, its tests or the code). A changed task definition is
+// (statefile workflow), the operator can have the ARCHITECT analyze the
+// task — its definition, the phase WBS and plan, its tests and validation,
+// and the recovery reason — for optimizations that remove the cause of the
+// recovery. The analysis is submitted through the MCP server (an ANALYSIS
+// result); when it lists optimizations, the operator can have the
+// ARCHITECT implement them (the task definition, its tests or the code). A changed task definition is
 // adopted through the replan checks (same key, kind and dependencies);
 // either way the task's attempt counters reset. Both run in the background
 // (a worker command takes minutes) and record their outcome as events,
@@ -269,7 +266,7 @@ func (e *Engine) startTaskOp(ctx context.Context, projectID, executionID uuid.UU
 }
 
 // runAnalysis sends "analyze task <KEY>" in a fresh session and records
-// the parsed TASK_ANALYSIS.md (or why there is none).
+// the submitted analysis (or why there is none).
 func (e *Engine) runAnalysis(ctx context.Context, st *engineState, note string) error {
 	key := wbs.UnitKey(st.unit)
 	record := func(payload map[string]any) error {
@@ -277,15 +274,7 @@ func (e *Engine) runAnalysis(ctx context.Context, st *engineState, note string) 
 		return e.event(ctx, nil, st, execution.EventUnitAnalyzed, payload)
 	}
 	fail := func(msg string) error { return record(map[string]any{"fixable": false, "error": msg}) }
-	format, err := e.statefileFormat(ctx, st.rec.ProjectID)
-	if err != nil {
-		return fail(err.Error())
-	}
-	// A stale analysis is never read back as this one's.
-	if err := writeStatefile(st.cwd(), wbs.AnalysisFile, ""); err != nil {
-		return fail("could not reset " + wbs.AnalysisFile + ": " + err.Error())
-	}
-	cmd, err := e.analysisCommand(ctx, st, format, note)
+	cmd, err := e.analysisCommand(ctx, st, note)
 	if err != nil {
 		return fail(err.Error())
 	}
@@ -293,19 +282,16 @@ func (e *Engine) runAnalysis(ctx context.Context, st *engineState, note string) 
 	if _, err := e.d.Worker.NewSession(ctx, st.rec.ProjectID); err != nil {
 		return fail("a new worker session could not be opened: " + err.Error())
 	}
-	if msg := e.sendTaskCommand(ctx, st, cmd, "ANALYZE_TASK"); msg != "" {
+	dispatch, msg := e.sendTaskCommand(ctx, st, cmd, "ANALYZE_TASK")
+	if msg != "" {
 		return fail(msg)
 	}
-	content, problem := readPlanningDoc(st.cwd(), wbs.AnalysisFile)
-	if problem != "" {
-		return fail("the architect did not write the analysis: " + problem)
-	}
-	a, err := wbs.ParseTaskAnalysis(content)
+	a, problem, err := e.analysisResult(ctx, dispatch)
 	if err != nil {
-		return fail(wbs.AnalysisFile + ": " + err.Error())
+		return fail(err.Error())
 	}
-	if a.Task != key {
-		return fail(fmt.Sprintf("%s analyzes task %s, not %s", wbs.AnalysisFile, a.Task, key))
+	if problem != "" {
+		return fail(problem)
 	}
 	return record(map[string]any{"fixable": a.Fixable, "findings": a.Findings, "optimizations": a.Optimizations})
 }
@@ -323,12 +309,9 @@ func (e *Engine) runFix(ctx context.Context, st *engineState) error {
 		}
 		return e.event(ctx, nil, st, execution.EventUnitFixed, payload)
 	}
-	format, err := e.statefileFormat(ctx, st.rec.ProjectID)
-	if err != nil {
-		return record(false, err.Error(), false)
-	}
-	cmd := fixCommand(st, key, format)
-	if msg := e.sendTaskCommand(ctx, st, cmd, "FIX_TASK"); msg != "" {
+	cmd := fixCommand(st, key)
+	dispatch, msg := e.sendTaskCommand(ctx, st, cmd, "FIX_TASK")
+	if msg != "" {
 		return record(false, msg, false)
 	}
 	cur, err := e.load(ctx, st.rec.ID)
@@ -338,12 +321,12 @@ func (e *Engine) runFix(ctx context.Context, st *engineState) error {
 	if cur.unit == nil || cur.unit.ID != st.unit.ID {
 		return record(false, "the execution no longer has task "+key+" as its current task", false)
 	}
-	spec, changed, problem, err := e.replannedTask(ctx, cur)
+	spec, changed, problem, err := e.replannedTask(ctx, cur, &dispatch)
 	if err != nil {
 		return record(false, err.Error(), false)
 	}
 	if problem != "" {
-		return record(false, "the fix left the task files unacceptable (fix them by hand or run the analysis again): "+problem, false)
+		return record(false, "the fix submitted an unacceptable task definition (run the analysis again): "+problem, false)
 	}
 	if !changed {
 		return record(true, "Fix applied to the tests or code; the task definition is unchanged. Resume the execution to continue.", false)
@@ -367,34 +350,31 @@ func (e *Engine) runFix(ctx context.Context, st *engineState) error {
 }
 
 // sendTaskCommand dispatches one ARCHITECT command outside the workflow
-// (the execution is in recovery or paused) and returns "" when the worker replied,
-// otherwise why not.
-func (e *Engine) sendTaskCommand(ctx context.Context, st *engineState, cmd, stateKey string) string {
-	wp, err := compression.WorkerPromptFromCommand(feedback(cmd), e.d.Now().UTC())
+// (the execution is in recovery or paused) and returns its dispatch and ""
+// when the worker replied, otherwise why not.
+func (e *Engine) sendTaskCommand(ctx context.Context, st *engineState, cmd, stateKey string) (uuid.UUID, string) {
+	wp, err := e.commandPrompt(ctx, st, feedback(cmd), stateKey, "ARCHITECT")
 	if err != nil {
-		return "the command could not be prepared: " + err.Error()
-	}
-	if err := e.d.CommandPrompts.CreateWorkerPrompt(ctx, st.rec.ProjectID, &wp); err != nil {
-		return "the command could not be stored: " + err.Error()
+		return uuid.Nil, "the command could not be prepared: " + err.Error()
 	}
 	if _, err := e.ensureSession(ctx, st, true); err != nil {
-		return "the worker session is not ready: " + err.Error()
+		return uuid.Nil, "the worker session is not ready: " + err.Error()
 	}
 	res, err := e.d.Worker.Dispatch(ctx, DispatchRequest{ProjectID: st.rec.ProjectID, PhaseID: st.runtime.PhaseID, WorkUnitID: &st.unit.ID,
 		WorkerPromptID: wp.ID, RuntimeStateID: st.runtime.ID, StateKey: stateKey, RoleKey: "ARCHITECT", Attempt: 1})
 	if err != nil {
-		return "the command could not be sent: " + err.Error()
+		return uuid.Nil, "the command could not be sent: " + err.Error()
 	}
 	if res.Err != nil {
-		return "the worker did not complete the command: " + res.Err.Error()
+		return res.Dispatch.ID, "the worker did not complete the command: " + res.Err.Error()
 	}
-	return ""
+	return res.Dispatch.ID, ""
 }
 
 // analysisCommand is "analyze task <KEY>" with what the ARCHITECT needs:
 // the recovery reason and evidence, where the task is described, how the
 // overseer validates, and the analysis format.
-func (e *Engine) analysisCommand(ctx context.Context, st *engineState, format worker.ResponseFormat, note string) (string, error) {
+func (e *Engine) analysisCommand(ctx context.Context, st *engineState, note string) (string, error) {
 	key := wbs.UnitKey(st.unit)
 	var b strings.Builder
 	fmt.Fprintf(&b, "analyze task %s\n\n", key)
@@ -438,34 +418,19 @@ func (e *Engine) analysisCommand(ctx context.Context, st *engineState, format wo
 	if paused {
 		goal = "keep the task from failing or stalling"
 	}
-	wbsRef := wbs.WBSDir + "/"
-	if ph := st.workPhase(); ph != nil {
-		wbsRef = wbs.WBSFile(ph.Order)
-	}
-	fmt.Fprintf(&b, "\nAnalyze task %s end to end: its definition in %s (and %s), what %s and the phase WBS in %s say about it, "+
-		"its acceptance criteria, required tests and validation commands, and the test cases and code they exercise. "+
-		"The overseer runs the validation commands itself, in %s, as %s. "+
-		"Look for optimizations to the task definition, its tests or the code that %s. Do not change anything yet.\n\n",
-		key, wbs.ActiveTaskFile, wbs.BacklogFile, wbs.PlanFile, wbsRef, st.cwd(), validationUser(), goal)
-	fmt.Fprintf(&b, "Write the analysis to %s in exactly this format, then reply with a one-line summary:\n\n", wbs.AnalysisFile)
-	if syntaxFor(format).kv {
-		fmt.Fprintf(&b, "```text\ntitle: Task analysis — %s\ntask: %s\nfixable: yes | no\nfinding: <what causes the recovery>\noptimization: <one concrete change to the task, its tests or the code>\n```\n\n"+
-			"Repeat finding: and optimization: for more items. fixable: yes only when the optimizations remove the cause.", key, key)
-	} else {
-		fmt.Fprintf(&b, "```markdown\n# Task analysis — %s\n\nTask: %s\nFixable: yes | no\n\n## Findings\n- <what causes the recovery>\n\n## Optimizations\n- <one concrete change to the task, its tests or the code>\n```\n\n"+
-			"Fixable: yes only when the optimizations remove the cause.", key, key)
-	}
+	fmt.Fprintf(&b, "\nAnalyze task %s end to end: its definition (get_task), the phase WBS and plan (get_context), its acceptance "+
+		"criteria, required tests and validation commands, and the test cases and code they exercise. The overseer runs the validation "+
+		"commands itself, in %s, as %s. Look for optimizations to the task definition, its tests or the code that %s. Do not change anything yet. "+
+		"fixable is true only when the optimizations remove the cause.", key, st.cwd(), validationUser(), goal)
 	return b.String(), nil
 }
 
 // fixCommand is "fix task <KEY>": implement the analysis's optimizations.
-func fixCommand(st *engineState, key string, format worker.ResponseFormat) string {
-	sx := syntaxFor(format)
-	return fmt.Sprintf("fix task %s\n\nAct as the ARCHITECT. Implement the optimizations listed in %s for task %s, and nothing else. "+
-		"You may change the task's tests and code. When the task definition changes, rewrite it identically in %s and %s: keep its key, kind and "+
-		"dependencies, set `%s` and leave every acceptance criterion unchecked, in the task file format below. Do not mark the task done. "+
-		"The overseer runs the validation commands itself, in %s, as %s. Reply with a short summary of what you changed.",
-		key, wbs.AnalysisFile, key, wbs.BacklogFile, wbs.ActiveTaskFile, sx.status("ACTIVE"), st.cwd(), validationUser()) + expectedFormat(format)
+func fixCommand(st *engineState, key string) string {
+	return fmt.Sprintf("fix task %s\n\nAct as the ARCHITECT. Implement the optimizations of the last analysis of task %s "+
+		"(get_execution_history), and nothing else. You may change the task's tests and code, and its definition (keep its key, kind and "+
+		"dependencies). Do not mark the task done. The overseer runs the validation commands itself, in %s, as %s.",
+		key, key, st.cwd(), validationUser())
 }
 
 // evidenceText renders recovery evidence as sorted "key=value" pairs.
