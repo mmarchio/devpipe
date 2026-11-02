@@ -71,6 +71,8 @@ func (s *WorkerService) Dispatch(ctx context.Context, req DispatchRequest) (*Dis
 	}
 	res, err := s.execute(ctx, a)
 	switch {
+	case errors.Is(context.Cause(ctx), ErrProcessesCleared):
+		// An operator interrupt says nothing about the provider.
 	case err != nil:
 		s.recordAvailability(ctx, req.ProjectID, worker.AsWorkerError(err))
 	case res != nil:
@@ -297,6 +299,15 @@ func (s *WorkerService) execute(ctx context.Context, a *admitted) (*DispatchResu
 		s.d.Logger.WarnContext(ctx, "worker call interrupted by shutdown; delivery unknown", "dispatch_id", d.ID.String(), "error", sendErr.Error())
 		return fail(we, worker.DispatchWaiting)
 	}
+	if sendErr != nil && errors.Is(context.Cause(ctx), ErrProcessesCleared) {
+		// The operator cleared the execution's processes: the call was
+		// abandoned on purpose. The dispatch is CANCELLED and never resent;
+		// whether the worker received it stays unknown.
+		we := worker.NewError(worker.CodeCancelled, worker.DeliveryUnknown, "worker call interrupted by the operator (clear processes)", ErrProcessesCleared)
+		r, err := fail(we, worker.DispatchWaiting)
+		s.logDispatch(ctx, r.Dispatch, nil, we)
+		return r, err
+	}
 	if sendErr != nil {
 		we := worker.AsWorkerError(sendErr)
 		pw.recordErr(we, s.d.Now())
@@ -407,6 +418,9 @@ func errString(err error) string {
 // Decision 5) and the matching audit event.
 func (s *WorkerService) finishFailed(ctx context.Context, d *worker.WorkerDispatch, from worker.DispatchStatus, we *worker.WorkerError, sess *persistence.WorkerSessionRecord) {
 	to := worker.OutcomeFor(we)
+	if errors.Is(we, ErrProcessesCleared) {
+		to = worker.DispatchCancelled
+	}
 	if from == worker.DispatchPending && to == worker.DispatchUnknown {
 		// Nothing left the overseer before SENDING.
 		to, we.Delivery = worker.DispatchFailed, worker.DeliveryNotSent

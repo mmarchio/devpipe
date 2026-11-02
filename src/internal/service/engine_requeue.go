@@ -15,13 +15,14 @@ import (
 // Requeue restarts the current task of a statefile-workflow execution from
 // the beginning (operator action): the task is reset to READY, the worker
 // context is cleared (a new session), the task's attempt counters and
-// manual approvals are reset, and the workflow returns to ACCEPTANCE,
-// where the overseer loads the task again.
+// manual approvals are reset, and the workflow returns to ACCEPTANCE (v4:
+// ACCEPTANCE_CHECK), where the overseer loads the task again.
 //
 // A worker command already sent cannot be interrupted, so a requeue is
 // first recorded as a request: it is applied at once when the execution is
 // idle, otherwise by the engine at the next step boundary (after the
-// running step finishes).
+// running step finishes). ClearProcesses interrupts the running step
+// instead of waiting for it.
 
 // Requeue results.
 const (
@@ -117,21 +118,31 @@ func requeueable(st *engineState) error {
 	return nil
 }
 
-// pendingRequeue reports whether a requeue of the current task was
-// requested and not yet applied.
-func (e *Engine) pendingRequeue(ctx context.Context, st *engineState) (bool, error) {
+// pendingRequeue returns the request of a requeue of the current task
+// that was requested and not yet applied (nil when none is pending).
+func (e *Engine) pendingRequeue(ctx context.Context, st *engineState) (*persistence.EventRef, error) {
 	if st.unit == nil || st.unit.Status == wbs.WorkUnitStatusDONE || !st.statefileWorkflow() {
-		return false, nil
+		return nil, nil
 	}
 	req, err := e.d.Repo.LastEvent(ctx, nil, st.rec.ID, execution.EventUnitRequeueRequested, &st.unit.ID)
 	if err != nil || req == nil {
-		return false, err
+		return nil, err
 	}
 	done, err := e.d.Repo.LastEvent(ctx, nil, st.rec.ID, execution.EventUnitRequeued, &st.unit.ID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return done == nil || done.Seq < req.Seq, nil
+	if done != nil && done.Seq > req.Seq {
+		return nil, nil
+	}
+	return req, nil
+}
+
+// interruptsStep reports whether a requeue request came from
+// ClearProcesses: it applies even over a pending (interrupted) step.
+func interruptsStep(req *persistence.EventRef) bool {
+	v, _ := req.Payload["interrupt"].(bool)
+	return v
 }
 
 // applyRequeue restarts the current task (the caller holds the driver
@@ -140,9 +151,8 @@ func (e *Engine) pendingRequeue(ctx context.Context, st *engineState) (bool, err
 func (e *Engine) applyRequeue(ctx context.Context, st *engineState) error {
 	u := st.unit
 	key := wbs.UnitKey(u)
-	acceptance, from := st.byKey["ACCEPTANCE"], st.byKey[st.cur.Key]
-	if acceptance == nil || from == nil {
-		return fmt.Errorf("%w: the workflow has no ACCEPTANCE state or the current state is unknown", ErrNotRequeueable)
+	if st.byKey[st.acceptanceKey()] == nil || st.byKey[st.cur.Key] == nil {
+		return fmt.Errorf("%w: the workflow has no %s state or the current state is unknown", ErrNotRequeueable, st.acceptanceKey())
 	}
 	var session *uuid.UUID
 	if e.d.Worker != nil {
@@ -171,41 +181,54 @@ func (e *Engine) applyRequeue(ctx context.Context, st *engineState) error {
 		if err := e.d.Repo.ClearUnitApprovals(ctx, tx, u.ID); err != nil {
 			return err
 		}
-		rt := *st.runtime
-		now := e.d.Now().UTC()
-		next := rt
-		next.CurrentStateID, next.EnteredAt, next.WorkUnitID = acceptance.ID, now, nil
-		if err := e.d.Runtime.WithTx(tx).UpdateWithVersion(ctx, &next, rt.Version); err != nil {
-			return err
-		}
-		next.Version = rt.Version + 1
-		execID := st.rec.ID
-		if err := e.d.Execs.AppendHistory(ctx, tx, &persistence.TransitionHistoryRecord{ProjectID: rt.ProjectID, StateMachineID: rt.StateMachineID,
-			StateMachineVersion: rt.StateMachineVersion, FromStateID: from.ID, ToStateID: acceptance.ID, Outcome: "REQUEUE",
-			PhaseID: rt.PhaseID, WorkUnitID: &u.ID, RuntimeVersion: next.Version, ExecutionID: &execID, CreatedAt: now}); err != nil {
-			return err
-		}
-		upd := persistence.PositionUpdate{SetUnit: true, UnitID: nil, RuntimeStateID: &next.ID, SetWait: true, SessionID: session}
+		upd := persistence.PositionUpdate{SessionID: session}
 		switch st.rec.Status {
 		case execution.ExecutionRecovery:
 			upd.Status, upd.Reason, upd.SetRecovery = execution.ExecutionRunning, "task "+key+" requeued", true
 		case execution.ExecutionWaiting:
 			upd.Status, upd.Reason = execution.ExecutionRunning, "task "+key+" requeued"
 		}
-		rec, err := e.d.Repo.UpdatePosition(ctx, tx, st.rec.ID, st.rec.Version, upd)
-		if err != nil {
+		if err := e.toAcceptance(ctx, tx, st, "REQUEUE", upd); err != nil {
 			return err
 		}
 		payload := map[string]any{"work_unit_id": u.ID.String(), "key": key, "from": st.cur.Key, "resets": requeueResets}
 		if session != nil {
 			payload["session_id"] = session.String()
 		}
-		if err := e.event(ctx, tx, st, execution.EventUnitRequeued, payload); err != nil {
-			return err
-		}
-		st.rec, st.runtime = rec, &next
-		return nil
+		return e.event(ctx, tx, st, execution.EventUnitRequeued, payload)
 	})
+}
+
+// toAcceptance moves the workflow from its current state to ACCEPTANCE
+// (v4: ACCEPTANCE_CHECK) with no current task, in tx (outcome is recorded in the transition
+// history): the overseer then loads the next task in plan order. upd
+// carries any status change; the position fields are set here.
+func (e *Engine) toAcceptance(ctx context.Context, tx persistence.Transaction, st *engineState, outcome string, upd persistence.PositionUpdate) error {
+	acceptance, from := st.byKey[st.acceptanceKey()], st.byKey[st.cur.Key]
+	if acceptance == nil || from == nil {
+		return fmt.Errorf("%w: the workflow has no %s state or the current state is unknown", ErrConflict, st.acceptanceKey())
+	}
+	rt := *st.runtime
+	now := e.d.Now().UTC()
+	next := rt
+	next.CurrentStateID, next.EnteredAt, next.WorkUnitID = acceptance.ID, now, nil
+	if err := e.d.Runtime.WithTx(tx).UpdateWithVersion(ctx, &next, rt.Version); err != nil {
+		return err
+	}
+	next.Version = rt.Version + 1
+	execID := st.rec.ID
+	if err := e.d.Execs.AppendHistory(ctx, tx, &persistence.TransitionHistoryRecord{ProjectID: rt.ProjectID, StateMachineID: rt.StateMachineID,
+		StateMachineVersion: rt.StateMachineVersion, FromStateID: from.ID, ToStateID: acceptance.ID, Outcome: outcome,
+		PhaseID: rt.PhaseID, WorkUnitID: rt.WorkUnitID, RuntimeVersion: next.Version, ExecutionID: &execID, CreatedAt: now}); err != nil {
+		return err
+	}
+	upd.SetUnit, upd.UnitID, upd.RuntimeStateID, upd.SetWait = true, nil, &next.ID, true
+	rec, err := e.d.Repo.UpdatePosition(ctx, tx, st.rec.ID, st.rec.Version, upd)
+	if err != nil {
+		return err
+	}
+	st.rec, st.runtime = rec, &next
+	return nil
 }
 
 // requeueHint is appended to the acceptance command after a requeue, until

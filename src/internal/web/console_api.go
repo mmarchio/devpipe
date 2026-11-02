@@ -301,7 +301,7 @@ func (a *ConsoleAPI) projects(w http.ResponseWriter, r *http.Request) {
 
 var setupFields = map[string]bool{"name": true, "description": true, "working_directory": true, "worker_provider": true,
 	"worker_model": true, "compression_provider": true, "compression_model": true, "context_window": true,
-	"context_threshold": true, "planning": true, "checkpoint_policy": true, "use_git": true}
+	"context_threshold": true, "planning": true, "checkpoint_policy": true, "use_git": true, "workflow": true}
 
 func (a *ConsoleAPI) createProject(w http.ResponseWriter, r *http.Request) {
 	var in service.ProjectSetup

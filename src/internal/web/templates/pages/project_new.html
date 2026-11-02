@@ -41,6 +41,10 @@
 <div class="field"><label><input type="checkbox" name="use_git" value="yes"{{if eq (index .Form "use_git") "yes"}} checked{{end}}> Use git</label>
 <div class="hint">Commit a git checkpoint after each accepted task. The working directory must be a git repository. Off: no checkpoints.</div>
 {{template "fielderror" (index .Errors "checkpoint_policy")}}</div>
+<div class="field"><label for="workflow">Workflow</label>
+<select id="workflow" name="workflow"><option value="statefile"{{if ne (index .Form "workflow") "git_gated"}} selected{{end}}>Default — the overseer validates and accepts each task</option><option value="git_gated"{{if eq (index .Form "workflow") "git_gated"}} selected{{end}}>Git-gated TDD — tests first, locked; coder in a sandbox branch; main fast-forwarded</option></select>
+<div class="hint">Git-gated: the tester's tests are committed on task/&lt;key&gt; and locked by fingerprint; the coder works in sandbox/&lt;key&gt;, which is discarded when the tests change or validation fails; validated tasks are fast-forwarded into main. Requires a git repository with a main branch (git is always used).</div>
+{{template "fielderror" (index .Errors "workflow")}}</div>
 </fieldset>
 <button type="submit" data-pending="Creating…">Create project</button>
 </form>

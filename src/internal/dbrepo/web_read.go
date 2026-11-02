@@ -441,7 +441,7 @@ func (r *WebReadRepository) WorkUnitPage(ctx context.Context, f persistence.Work
 	if offset < 0 {
 		offset = 0
 	}
-	q := `WITH u AS (SELECT w.id, w.sequence, w.unit_key, w.kind, w.name, w.status, w.started_at, w.completed_at,
+	q := `WITH u AS (SELECT w.id, w.sequence, w.unit_key, w.kind, w.scope, w.name, w.status, w.started_at, w.completed_at,
 			ARRAY(SELECT COALESCE(NULLIF(d2.unit_key, ''), '#' || d2.sequence::text) FROM work_unit_dependencies d
 				JOIN work_units d2 ON d2.id = d.depends_on_work_unit_id WHERE d.work_unit_id = w.id ORDER BY d2.sequence) AS deps,
 			ARRAY(SELECT COALESCE(NULLIF(d2.unit_key, ''), '#' || d2.sequence::text) FROM work_unit_dependencies d
@@ -450,7 +450,7 @@ func (r *WebReadRepository) WorkUnitPage(ctx context.Context, f persistence.Work
 			COALESCE((SELECT vr.status FROM validation_runs vr WHERE vr.work_unit_id = w.id ORDER BY vr.started_at DESC LIMIT 1), '') AS vstatus,
 			COALESCE((SELECT rc.status FROM repository_checkpoints rc WHERE rc.kind = 'UNIT' AND rc.target_id = w.id ORDER BY rc.created_at DESC LIMIT 1), '') AS cstatus
 		FROM work_units w WHERE w.execution_plan_id = $1)
-		SELECT id, sequence, unit_key, kind, name, status, deps, blocking, attempts, vstatus, cstatus, started_at, completed_at, count(*) OVER ()
+		SELECT id, sequence, unit_key, kind, scope, name, status, deps, blocking, attempts, vstatus, cstatus, started_at, completed_at, count(*) OVER ()
 		FROM u`
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -466,7 +466,7 @@ func (r *WebReadRepository) WorkUnitPage(ctx context.Context, f persistence.Work
 	total := 0
 	for rows.Next() {
 		var x persistence.WorkUnitRow
-		if err := rows.Scan(&x.ID, &x.Sequence, &x.Key, &x.Kind, &x.Name, &x.Status, &x.Deps, &x.Blocking, &x.Attempts,
+		if err := rows.Scan(&x.ID, &x.Sequence, &x.Key, &x.Kind, &x.Scope, &x.Name, &x.Status, &x.Deps, &x.Blocking, &x.Attempts,
 			&x.Validation, &x.Checkpoint, &x.StartedAt, &x.CompletedAt, &total); err != nil {
 			return nil, 0, tr("scan work unit row", err)
 		}

@@ -33,8 +33,11 @@ import (
 // The check states read the submitted results (task_reports) and decide
 // every transition; the worker's reply is never parsed. Deterministic
 // validation and the checkpoint run under overseer control between TEST
-// and acceptance. The statefiles that once held the workflow state are no
-// longer read or written; only the generated team files remain on disk.
+// and acceptance. The v4 workflow has no TEST or ACCEPTANCE command: an
+// implemented task goes straight to the overseer's validation, and
+// ACCEPTANCE_CHECK accepts it when that passed (automatedAcceptance). The
+// statefiles that once held the workflow state are no longer read or
+// written; only the generated team files remain on disk.
 
 // maxCommandRetries bounds resending a command whose dispatch failed.
 const maxCommandRetries = 3
@@ -97,6 +100,13 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 	if problem != "" {
 		cmd += "\n\nThe result of this command was rejected: " + feedback(problem) + ". Redo this command and submit its result."
 	}
+	if key == "CMD_IMPLEMENT" && st.gitGated() {
+		rules, err := e.implementRules(ctx, st)
+		if err != nil {
+			return "", err
+		}
+		cmd += rules
+	}
 	if key == "CMD_ACCEPTANCE" {
 		hint, err := e.requeueHint(ctx, st)
 		if err != nil {
@@ -113,6 +123,13 @@ func (e *Engine) commandText(ctx context.Context, st *engineState) (string, erro
 	}
 	if key != "CMD_PLAN" {
 		return cmd, nil
+	}
+	if e.planMode(ctx, st) == wbs.PlanKindAmendment {
+		ac, err := e.amendmentContext(ctx, st)
+		if err != nil {
+			return "", err
+		}
+		cmd += ac
 	}
 	// A rejected plan: the problems travel in the command.
 	var problems wbs.PlanProblems
@@ -266,6 +283,13 @@ func (e *Engine) handleCommand(ctx context.Context, st *engineState, step *persi
 				}
 				return *stop, nil
 			}
+		case tmpl == "CMD_QA_TESTS":
+			if stop, err := e.prepareQATests(ctx, st, step, opts); stop != nil || err != nil {
+				if err != nil {
+					return execution.StepResult{}, err
+				}
+				return *stop, nil
+			}
 		case tmpl == "CMD_IMPLEMENT" || tmpl == "CMD_CONTINUE" || tmpl == "CMD_TEST":
 			if st.unit == nil {
 				return e.requireRecovery(ctx, st, step, "no active task", nil)
@@ -283,7 +307,16 @@ func (e *Engine) handleCommand(ctx context.Context, st *engineState, step *persi
 				}
 				return *stop, nil
 			}
-			if tmpl == "CMD_IMPLEMENT" && implements == 0 {
+			if tmpl == "CMD_IMPLEMENT" && st.gitGated() {
+				// The QA command started the task; every attempt runs in
+				// the sandbox with a fresh context.
+				if stop, err := e.prepareImplement(ctx, st, step); stop != nil || err != nil {
+					if err != nil {
+						return execution.StepResult{}, err
+					}
+					return *stop, nil
+				}
+			} else if tmpl == "CMD_IMPLEMENT" && implements == 0 {
 				// The next task is loaded: a requested pause applies now.
 				if stop, err := e.pauseBeforeTask(ctx, st, step); stop != nil || err != nil {
 					if err != nil {
@@ -476,6 +509,22 @@ func (st *engineState) statefileWorkflow() bool {
 	return false
 }
 
+// automatedAcceptance reports a statefile workflow (v4) without the TEST
+// and ACCEPTANCE commands: the overseer's validation decides a task and
+// ACCEPTANCE_CHECK accepts it without a team result.
+func (st *engineState) automatedAcceptance() bool {
+	return st.statefileWorkflow() && st.byKey["ACCEPTANCE"] == nil
+}
+
+// acceptanceKey is the state a requeue returns to: ACCEPTANCE (v3, the
+// project manager's command) or ACCEPTANCE_CHECK (v4).
+func (st *engineState) acceptanceKey() string {
+	if st.automatedAcceptance() {
+		return "ACCEPTANCE_CHECK"
+	}
+	return "ACCEPTANCE"
+}
+
 // commandFailed classifies the pending command dispatch: nil when the
 // worker replied; otherwise the step either resends the command (RETRY,
 // bounded) or requires recovery.
@@ -607,7 +656,8 @@ func (e *Engine) consecutiveFailedCommands(ctx context.Context, st *engineState,
 	return n, nil
 }
 
-// handleImplementCheck: a reply from IMPLEMENT / CONTINUE leads to TEST;
+// handleImplementCheck: a reply from IMPLEMENT / CONTINUE leads to TEST
+// (v4: to the overseer's validation);
 // a run cut off before the reply (timeout, unknown delivery, context
 // limit) is resumed with CONTINUE; anything else needs recovery.
 func (e *Engine) handleImplementCheck(ctx context.Context, st *engineState, step *persistence.StepRecord) (execution.StepResult, error) {
@@ -631,7 +681,12 @@ func (e *Engine) handleImplementCheck(ctx context.Context, st *engineState, step
 			}
 			return *stop, nil
 		}
-		return e.advance(ctx, st, step, "REPLIED", advanceOpts{Refs: refs, Outcome: "REPLIED"})
+		opts := advanceOpts{Refs: refs, Outcome: "REPLIED"}
+		if st.automatedAcceptance() {
+			// No tester: the overseer's validation follows directly.
+			opts.Tx = toValidating(ctx, e, st.unit.ID)
+		}
+		return e.advance(ctx, st, step, "REPLIED", opts)
 	}
 	switch we.Code {
 	case worker.CodeTimeout, worker.CodeDeliveryUnknown, worker.CodeContextLimit, worker.CodeCancelled, worker.CodeUnavailable:
@@ -680,10 +735,14 @@ func toValidating(ctx context.Context, e *Engine, uid uuid.UUID) func(persistenc
 // finished task, and the overseer loads the next executable task (NEXT)
 // or completes the phase (PHASE_COMPLETE). A task still in progress
 // (resumed execution) continues, or goes straight to validation (TESTED)
-// when it was tested already.
+// when it was tested already. In the v4 workflow no command precedes the
+// check: the overseer accepts the task its validation just passed.
 func (e *Engine) handleAcceptanceCheck(ctx context.Context, st *engineState, step *persistence.StepRecord) (execution.StepResult, error) {
 	if st.plan == nil {
 		return e.requireRecovery(ctx, st, step, "no current plan", nil)
+	}
+	if st.automatedAcceptance() {
+		return e.acceptanceResult(ctx, st, step, nil, persistence.StepRefs{})
 	}
 	pend, err := e.pendingDispatch(ctx, st)
 	if err != nil {
@@ -713,13 +772,25 @@ func (e *Engine) finishUnit(ctx context.Context, st *engineState, step *persiste
 	if err != nil || run.Status != string(execution.ValidationPass) || run.Acceptance == nil || run.Acceptance.Outcome != execution.AcceptancePass {
 		return stop("task "+wbs.UnitKey(u)+" was accepted without a passing overseer validation", map[string]any{"work_unit_id": uid.String()})
 	}
-	cp, err := e.checkpoint(ctx, st, step, execution.RepoCheckpointUnit, uid, &run.ID, st.engine.CheckpointPolicy, fmt.Sprintf("task %s %s", wbs.UnitKey(u), u.Name))
+	policy := st.engine.CheckpointPolicy
+	if st.gitGated() {
+		// The validated work reaches main only through its commit.
+		policy = execution.CheckpointRequired
+	}
+	cp, err := e.checkpoint(ctx, st, step, execution.RepoCheckpointUnit, uid, &run.ID, policy, fmt.Sprintf("task %s %s", wbs.UnitKey(u), u.Name))
 	if err != nil {
 		return nil, pendingEvent{}, nil, err
 	}
-	if cp.Status == persistence.CheckpointFailed && execution.OnCheckpointFailure(st.engine.CheckpointPolicy) == execution.CheckpointBlock {
+	if cp.Status == persistence.CheckpointFailed && execution.OnCheckpointFailure(policy) == execution.CheckpointBlock {
 		reason, ev := e.checkpointFailure(ctx, st, "required checkpoint failed", cp.Error, map[string]any{"checkpoint_id": cp.ID.String(), "error": cp.Error})
 		return stop(reason, ev)
+	}
+	if st.gitGated() {
+		if reason, err := e.promoteTask(ctx, st, u, cp.Commit); err != nil {
+			return nil, pendingEvent{}, nil, err
+		} else if reason != "" {
+			return stop(reason, map[string]any{"checkpoint_id": cp.ID.String(), "commit": cp.Commit})
+		}
 	}
 	runID := run.ID
 	return func(tx persistence.Transaction) error { return e.d.Repo.MarkUnitDone(ctx, tx, uid, st.rec.ID, runID) },

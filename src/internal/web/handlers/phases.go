@@ -25,6 +25,11 @@ type phasesData struct {
 	OrderError string
 	// Reorderable is set when at least two phases can move.
 	Reorderable bool
+	// TaskScope is the tasks the orchestrator works on: "MVP" (MVP tasks
+	// only) or "FULL" (MVP and FULL tasks).
+	TaskScope string
+	// ScopeError is a rejected task-scope change's problem (empty = none).
+	ScopeError string
 }
 
 func (c *Console) phaseList(r *http.Request) ([]readmodel.PhaseRow, bool) {
@@ -35,14 +40,55 @@ func (c *Console) phaseList(r *http.Request) ([]readmodel.PhaseRow, bool) {
 	return l.Phases, resp.OK()
 }
 
+// phasesPage loads the phases page's data: the phases and the task scope.
+func (c *Console) phasesPage(r *http.Request) phasesData {
+	list, _ := c.phaseList(r)
+	var ts struct {
+		Scope string `json:"scope"`
+	}
+	if resp := c.d.API.Get(r, "/api/v1/projects/"+pid(r)+"/task-scope", &ts); !resp.OK() || ts.Scope == "" {
+		ts.Scope = "FULL"
+	}
+	return phasesData{Phases: list, Reorderable: reorderable(list), TaskScope: ts.Scope}
+}
+
+// setTaskScope — POST /projects/{id}/task-scope ("scope" = MVP | FULL):
+// the tasks the orchestrator works on.
+func (c *Console) setTaskScope(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		c.htmlError(w, r, http.StatusBadRequest, "invalid_input", "The form could not be read.")
+		return
+	}
+	scope := r.PostFormValue("scope")
+	resp := c.d.API.Do(r, http.MethodPut, "/api/v1/projects/"+pid(r)+"/task-scope", map[string]any{"scope": scope}, "")
+	if !resp.OK() {
+		if resp.Status != http.StatusBadRequest {
+			c.apiError(w, r, resp)
+			return
+		}
+		ov, ok := c.overview(w, r)
+		if !ok {
+			return
+		}
+		d := c.phasesPage(r)
+		_, d.ScopeError, _ = resp.Error()
+		c.render(w, r, http.StatusUnprocessableEntity, "phases", viewmodels.Page{Shell: c.projectShell(r, "Phases", ov), Data: d})
+		return
+	}
+	notice := "Tasks: MVP and FULL. The orchestrator works on every task."
+	if scope == "MVP" {
+		notice = "Tasks: MVP only. The orchestrator skips FULL tasks that have not started."
+	}
+	redirect(w, r, "/projects/"+pid(r)+"/phases", notice)
+}
+
 // phases — GET /projects/{id}/phases (WBS 17.15–17.17).
 func (c *Console) phases(w http.ResponseWriter, r *http.Request) {
 	ov, ok := c.overview(w, r)
 	if !ok {
 		return
 	}
-	list, _ := c.phaseList(r)
-	c.render(w, r, http.StatusOK, "phases", viewmodels.Page{Shell: c.projectShell(r, "Phases", ov), Data: phasesData{Phases: list, Reorderable: reorderable(list)}})
+	c.render(w, r, http.StatusOK, "phases", viewmodels.Page{Shell: c.projectShell(r, "Phases", ov), Data: c.phasesPage(r)})
 }
 
 // reorderable reports whether at least two phases can move.
@@ -74,10 +120,9 @@ func (c *Console) appendPhase(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			list, _ := c.phaseList(r)
 			_, msg, fields := resp.Error()
 			c.render(w, r, http.StatusUnprocessableEntity, "phases", viewmodels.Page{Shell: c.projectShell(r, "Phases", ov),
-				Data: phasesData{Phases: list, Reorderable: reorderable(list)}, Form: formValues(r), Errors: fields, Message: msg})
+				Data: c.phasesPage(r), Form: formValues(r), Errors: fields, Message: msg})
 			return
 		}
 		c.apiError(w, r, resp)
@@ -167,9 +212,9 @@ func (c *Console) orderError(w http.ResponseWriter, r *http.Request, msg string)
 	if !ok {
 		return
 	}
-	list, _ := c.phaseList(r)
-	c.render(w, r, http.StatusUnprocessableEntity, "phases", viewmodels.Page{Shell: c.projectShell(r, "Phases", ov),
-		Data: phasesData{Phases: list, OrderError: msg, Reorderable: reorderable(list)}})
+	d := c.phasesPage(r)
+	d.OrderError = msg
+	c.render(w, r, http.StatusUnprocessableEntity, "phases", viewmodels.Page{Shell: c.projectShell(r, "Phases", ov), Data: d})
 }
 
 // maxPhaseNameLen matches the append form's name limit.
@@ -277,9 +322,9 @@ func (c *Console) uploadError(w http.ResponseWriter, r *http.Request, msg string
 	if !ok {
 		return
 	}
-	list, _ := c.phaseList(r)
-	c.render(w, r, http.StatusUnprocessableEntity, "phases", viewmodels.Page{Shell: c.projectShell(r, "Phases", ov),
-		Data: phasesData{Phases: list, UploadError: msg, Reorderable: reorderable(list)}})
+	d := c.phasesPage(r)
+	d.UploadError = msg
+	c.render(w, r, http.StatusUnprocessableEntity, "phases", viewmodels.Page{Shell: c.projectShell(r, "Phases", ov), Data: d})
 }
 
 type phaseData struct {

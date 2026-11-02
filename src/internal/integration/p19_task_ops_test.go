@@ -109,7 +109,7 @@ func TestP19TaskAnalyzeAndFix(t *testing.T) {
 		case strings.HasPrefix(m.Content, "fix task A"):
 			fixes = append(fixes, m.Content)
 			team.mu.Lock()
-			unit := team.unit(*team.find("A"))
+			unit := team.unit(*team.find("A"), !team.noManual)
 			team.mu.Unlock()
 			unit["objective"] = "Deliver A, with the test result recorded."
 			team.submitFor(m, map[string]any{"status": "COMPLETE", "summary": "objective narrowed", "plan": map[string]any{"units": []any{unit}}})
@@ -294,5 +294,77 @@ func TestP19RepeatedActionIntervention(t *testing.T) {
 	}
 	if got := team.commandLines(); strings.Count(got, "test task A | test task A | test task A | test task A") != 0 {
 		t.Errorf("TEST was sent a fourth time in a row: %s", got)
+	}
+}
+
+// TestP19TaskFixSplitsTask — the architect's fix may split task A into
+// sub-tasks: they are inserted before A, the execution stays in recovery,
+// and on resume the overseer loads A.1, then A.2, then A, and completes.
+func TestP19TaskFixSplitsTask(t *testing.T) {
+	var fixes []string
+	r, team := taskOpsRig(t, func(m hermestest.Message, team *sfTeam) *hermestest.Behavior {
+		switch {
+		case strings.HasPrefix(m.Content, "analyze task A"):
+			team.submitFor(m, fixableAnalysis())
+			return replyWith("analysis submitted")
+		case strings.HasPrefix(m.Content, "fix task A"):
+			fixes = append(fixes, m.Content)
+			team.mu.Lock()
+			p1, p2 := sfTask{key: "A.1", status: "TODO"}, sfTask{key: "A.2", deps: "A.1", status: "TODO"}
+			team.tasks = append(team.tasks, p1, p2)
+			plan := team.plan(p1, p2, *team.find("A"))
+			team.mu.Unlock()
+			team.submitFor(m, map[string]any{"status": "COMPLETE", "summary": "split A", "plan": plan})
+			return replyWith("split A")
+		}
+		return nil
+	})
+	ctx := context.Background()
+	page := "/projects/" + r.pid.String() + "/executions/" + r.execID.String() + "/recovery"
+	if code, body, _ := r.b.form(page+"/analyze", nil); code != 200 {
+		t.Fatalf("analyze: %d %s", code, textOf(body))
+	}
+	waitTaskOps(t, r)
+	if code, body, _ := r.b.form(page+"/fix", nil); code != 200 {
+		t.Fatalf("fix: %d %s", code, textOf(body))
+	}
+	v := waitTaskOps(t, r)
+	if v.Fix == nil || !v.Fix.Success || !v.Fix.DefinitionChanged || !strings.Contains(v.Fix.Message, "split into A.1, A.2") {
+		t.Fatalf("after fix %+v %+v", v, v.Fix)
+	}
+	if len(fixes) != 1 || !strings.Contains(fixes[0], "split it") {
+		t.Fatalf("fix command: %q", fixes)
+	}
+	if r.execStatus(t) != string(execution.ExecutionRecovery) {
+		t.Fatal("the split left recovery by itself")
+	}
+	var order string
+	if err := r.h.DBScan(ctx, "SELECT string_agg(w.unit_key, ',' ORDER BY w.sequence) FROM work_units w JOIN execution_plans p ON p.id = w.execution_plan_id "+
+		"WHERE p.phase_id = '"+r.phases[1].String()+"' AND p.status <> 'SUPERSEDED'", &order); err != nil || order != "A.1,A.2,A,B" {
+		t.Fatalf("plan order %q %v", order, err)
+	}
+	team.mu.Lock()
+	before := len(team.cmds)
+	team.mu.Unlock()
+	if _, err := r.eng().ResolveRecovery(ctx, r.pid, r.execID, service.RecoveryResolution{Action: service.RecoveryResume}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := r.eng().Run(ctx, r.execID, 300)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, p16Trace(res))
+	}
+	if st := r.execStatus(t); st != string(execution.ExecutionCompleted) {
+		t.Fatalf("execution %s, recovery %q\ncommands %s\ntrace %s", st, r.recoveryReason(t), team.commandLines(), p16Trace(res))
+	}
+	team.mu.Lock()
+	var implemented []string
+	for _, c := range team.cmds[before:] {
+		if first, _, _ := strings.Cut(c, "\n"); strings.HasPrefix(first, "implement task ") {
+			implemented = append(implemented, strings.TrimPrefix(first, "implement task "))
+		}
+	}
+	team.mu.Unlock()
+	if got := strings.Join(implemented, ","); got != "A.1,A.2,A,B" {
+		t.Fatalf("implemented after resume %s, want A.1,A.2,A,B", got)
 	}
 }

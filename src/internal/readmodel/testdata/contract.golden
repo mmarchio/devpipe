@@ -599,6 +599,7 @@ UnitDetail.unit.key string
 UnitDetail.unit.kind string
 UnitDetail.unit.name string
 UnitDetail.unit.readiness string
+UnitDetail.unit.scope string
 UnitDetail.unit.sequence int
 UnitDetail.unit.stage string
 UnitDetail.unit.started_at time
@@ -675,6 +676,7 @@ UnitPage.units[].key string
 UnitPage.units[].kind string
 UnitPage.units[].name string
 UnitPage.units[].readiness string
+UnitPage.units[].scope string
 UnitPage.units[].sequence int
 UnitPage.units[].stage string
 UnitPage.units[].started_at time

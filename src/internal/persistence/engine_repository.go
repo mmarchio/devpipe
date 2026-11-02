@@ -307,6 +307,11 @@ type EngineRepository interface {
 	// ReplanUnit replaces a unit's specification with its replanned one
 	// and drops its manual-criterion approvals (the criteria changed).
 	ReplanUnit(ctx context.Context, ex Executor, unitID uuid.UUID, spec *wbs.WorkUnitSpecification) error
+	// SplitUnit inserts a unit's sub-tasks into its plan right before it
+	// (later units move down; parts' sequences are ignored) with their
+	// dependencies (keys of the plan's units), and makes the unit depend
+	// on every part. Requires a transaction.
+	SplitUnit(ctx context.Context, ex Executor, unitID uuid.UUID, parts []wbs.PlannedUnit) ([]*wbs.WorkUnit, error)
 	// LastEvent returns the execution's newest event of type typ — when
 	// workUnitID is set, the newest whose payload names that unit — or
 	// nil.

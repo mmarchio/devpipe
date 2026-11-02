@@ -55,9 +55,36 @@ type sfTeam struct {
 	replans         []string
 	replanCheck     string
 	replanNoopFirst bool
+	// replanSplit splits the replanned task into sub-tasks <KEY>.1 and
+	// <KEY>.2 (which run first) instead of only rewriting it.
+	replanSplit bool
+	// fullTask adds task F (scope FULL, after B) to phase 1's plan.
+	fullTask bool
+	// amendRepair answers amendment plan commands: the first resubmits
+	// the current tasks (which must be rejected), later ones add repair
+	// task R1 and call repaired. amendments are those commands.
+	amendRepair bool
+	amendments  []string
+	repaired    func()
 	// silentTests answers this many test commands without a result (the
 	// result given only in the reply).
 	silentTests int
+	// noManual plans tasks without the MANUAL criterion (the v4 workflow
+	// refuses one); manualFirstPlan still gives the first plan one.
+	noManual        bool
+	manualFirstPlan bool
+	plans           []string
+	// failFirstImplement makes the first implementation of this task fail
+	// the overseer's validation (its check exits 1); later ones pass.
+	failFirstImplement string
+	implemented        map[string]int
+	// Git-gated workflow: qaTests counts the "write the tests" commands;
+	// tamperFirstImplement makes the first implementation of this task
+	// weaken its locked test; sawImplementation records, per
+	// implementation, whether an earlier attempt's file was still there.
+	qaTests              map[string]int
+	tamperFirstImplement string
+	sawImplementation    []bool
 }
 
 // newSFTeam connects the team to the rig's MCP server.
@@ -70,7 +97,7 @@ func newSFTeam(t *testing.T, r *p16Rig) *sfTeam {
 	if err := os.MkdirAll(filepath.Join(r.dir, "src"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return &sfTeam{t: t, r: r, mcp: c, tested: map[string]int{}}
+	return &sfTeam{t: t, r: r, mcp: c, tested: map[string]int{}, implemented: map[string]int{}, qaTests: map[string]int{}}
 }
 
 // commandLines lists the commands received by their first line, the
@@ -97,6 +124,8 @@ type sfTask struct {
 	status    string
 	// check is the validation check the task runs (default: its key).
 	check string
+	// scope is the task's MVP / FULL category (default MVP).
+	scope string
 }
 
 func (t sfTask) checkName() string {
@@ -107,25 +136,33 @@ func (t sfTask) checkName() string {
 }
 
 // unit renders a task as a plan unit: validated by its check, with a
-// COMMAND and a MANUAL acceptance criterion.
-func (s *sfTeam) unit(t sfTask) map[string]any {
+// COMMAND and (unless manual is false) a MANUAL acceptance criterion.
+func (s *sfTeam) unit(t sfTask, manual bool) map[string]any {
 	cmd := map[string]any{"program": s.r.script, "args": []string{t.checkName()}}
 	deps := []string{}
 	if t.deps != "" {
 		deps = []string{t.deps}
 	}
-	return map[string]any{"key": t.key, "name": "Task " + t.key, "kind": "ATOMIC", "objective": "Deliver " + t.key + ".",
-		"acceptance_checks": []any{
-			map[string]any{"text": t.key + " behaves", "verification": "COMMAND", "command": cmd},
-			map[string]any{"text": t.key + " reviewed", "verification": "MANUAL"},
-		},
-		"validation": []any{cmd}, "depends_on": deps, "single_invocation": true}
+	checks := []any{map[string]any{"text": t.key + " behaves", "verification": "COMMAND", "command": cmd}}
+	if manual {
+		checks = append(checks, map[string]any{"text": t.key + " reviewed", "verification": "MANUAL"})
+	}
+	scope := t.scope
+	if scope == "" {
+		scope = "MVP"
+	}
+	return map[string]any{"key": t.key, "name": "Task " + t.key, "kind": "ATOMIC", "scope": scope, "objective": "Deliver " + t.key + ".",
+		"acceptance_checks": checks, "validation": []any{cmd}, "depends_on": deps, "single_invocation": true}
 }
 
 func (s *sfTeam) plan(tasks ...sfTask) map[string]any {
+	return s.planWith(!s.noManual, tasks...)
+}
+
+func (s *sfTeam) planWith(manual bool, tasks ...sfTask) map[string]any {
 	units := make([]any, 0, len(tasks))
 	for _, t := range tasks {
-		units = append(units, s.unit(t))
+		units = append(units, s.unit(t, manual))
 	}
 	return map[string]any{"summary": "planned", "units": units}
 }
@@ -181,20 +218,44 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 		if !s.replanNoopFirst || len(s.replans) > 1 {
 			t.check = s.replanCheck
 		}
+		if s.replanSplit {
+			// The task keeps its (empty) dependencies; naming its parts in
+			// depends_on is allowed.
+			p1, p2 := sfTask{key: key + ".1", deps: t.deps, status: "TODO"}, sfTask{key: key + ".2", deps: key + ".1", status: "TODO"}
+			s.tasks = append(s.tasks, p1, p2)
+			whole := *s.find(key)
+			whole.deps = p2.key
+			s.submit(tok, map[string]any{"status": "COMPLETE", "summary": "split " + key, "plan": s.plan(p1, p2, whole)})
+			break
+		}
 		s.submit(tok, map[string]any{"status": "COMPLETE", "summary": "replanned " + key, "plan": s.plan(*t)})
 	case strings.HasPrefix(cmd, "plan phase 2"):
 		// The plan repeats phase 1's tasks; only phase 2's are its work.
 		s.tasks = append(s.tasks, sfTask{key: "C", status: "TODO"}, sfTask{key: "D", deps: "C", status: "TODO"})
 		s.submit(tok, map[string]any{"status": "COMPLETE", "summary": "planned phase 2", "plan": s.plan(s.tasks...)})
+	case s.amendRepair && strings.HasPrefix(cmd, "plan phase 1") && strings.Contains(m.Content, "the phase plan is amended"):
+		s.amendments = append(s.amendments, m.Content)
+		if len(s.amendments) == 1 {
+			s.submit(tok, map[string]any{"status": "COMPLETE", "summary": "planned phase 1 again", "plan": s.plan(s.tasks...)})
+			break
+		}
+		r1 := sfTask{key: "R1", deps: "B", status: "TODO"}
+		s.tasks = append(s.tasks, r1)
+		s.repaired()
+		s.submit(tok, map[string]any{"status": "COMPLETE", "summary": "repair", "plan": s.plan(r1)})
 	case strings.HasPrefix(cmd, "plan phase 1"):
 		s.planned++
+		s.plans = append(s.plans, m.Content)
 		rejected := strings.Contains(m.Content, "The previous plan was rejected:")
-		if s.badFirstPlan && s.planned == 2 {
+		switch {
+		case s.manualFirstPlan && s.planned == 2:
+			// The test checks the rejection (plans).
+		case s.badFirstPlan && s.planned == 2:
 			if !rejected || !strings.Contains(m.Content, "- A INVALID_ACCEPTANCE_CHECK: acceptance check 1: COMMAND verification requires a command") ||
 				!strings.Contains(m.Content, "submit the corrected plan") {
 				s.t.Errorf("rejected plan retry: %q", m.Content)
 			}
-		} else if rejected {
+		case rejected:
 			s.t.Errorf("plan command %q carries a rejection before any", m.Content)
 		}
 		ctxv := s.mcp.must("get_context", map[string]any{"token": tok})
@@ -202,7 +263,10 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 			s.t.Errorf("get_context wbs %q", w)
 		}
 		s.tasks = []sfTask{{key: "A", status: "TODO"}, {key: "B", deps: "A", status: "TODO"}}
-		plan := s.plan(s.tasks...)
+		if s.fullTask {
+			s.tasks = append(s.tasks, sfTask{key: "F", deps: "B", status: "TODO", scope: "FULL"})
+		}
+		plan := s.planWith(!s.noManual || (s.manualFirstPlan && s.planned == 1), s.tasks...)
 		if s.badFirstPlan && s.planned == 1 {
 			a := plan["units"].([]any)[0].(map[string]any)
 			delete(a["acceptance_checks"].([]any)[0].(map[string]any), "command")
@@ -224,8 +288,37 @@ func (s *sfTeam) respond(m hermestest.Message) *hermestest.Behavior {
 			}
 		}
 		s.submit(tok, map[string]any{"status": "COMPLETE", "summary": "accepted"})
+	case strings.HasPrefix(cmd, "write the tests for task "):
+		key := strings.TrimPrefix(cmd, "write the tests for task ")
+		s.qaTests[key]++
+		// A restarted task's branch starts from main, without src/.
+		if err := os.MkdirAll(filepath.Join(s.r.dir, "src"), 0o755); err != nil {
+			s.t.Error(err)
+		}
+		if err := os.WriteFile(filepath.Join(s.r.dir, "src", key+"_test.go"), []byte("package src // spec "+key+"\n"), 0o644); err != nil {
+			s.t.Error(err)
+		}
+		s.submit(tok, map[string]any{"status": "COMPLETE", "summary": "wrote src/" + key + "_test.go"})
 	case strings.HasPrefix(cmd, "implement task "):
 		key := strings.TrimPrefix(cmd, "implement task ")
+		s.implemented[key]++
+		if err := os.MkdirAll(filepath.Join(s.r.dir, "src"), 0o755); err != nil {
+			s.t.Error(err)
+		}
+		_, err := os.Stat(filepath.Join(s.r.dir, "src", key+".txt"))
+		s.sawImplementation = append(s.sawImplementation, err == nil)
+		if key == s.tamperFirstImplement && s.implemented[key] == 1 {
+			if err := os.WriteFile(filepath.Join(s.r.dir, "src", key+"_test.go"), []byte("package src // weakened\n"), 0o644); err != nil {
+				s.t.Error(err)
+			}
+		}
+		if key == s.failFirstImplement {
+			code := 0
+			if s.implemented[key] == 1 {
+				code = 1
+			}
+			s.r.setCheck(s.t, s.find(key).checkName(), code)
+		}
 		if err := os.WriteFile(filepath.Join(s.r.dir, "src", key+".txt"), []byte("implemented "+key+"\n"), 0o644); err != nil {
 			s.t.Error(err)
 		}

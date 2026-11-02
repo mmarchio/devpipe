@@ -23,10 +23,13 @@ type StepAction string
 const (
 	// Statefile workflow: a command state sends its command; the check
 	// states read the statefiles the team wrote.
-	ActionCommand           StepAction = "COMMAND"
-	ActionImplementCheck    StepAction = "IMPLEMENT_CHECK"
-	ActionTestCheck         StepAction = "TEST_CHECK"
-	ActionAcceptanceCheck   StepAction = "ACCEPTANCE_CHECK"
+	ActionCommand         StepAction = "COMMAND"
+	ActionImplementCheck  StepAction = "IMPLEMENT_CHECK"
+	ActionTestCheck       StepAction = "TEST_CHECK"
+	ActionAcceptanceCheck StepAction = "ACCEPTANCE_CHECK"
+	// ActionQATestsCheck (git-gated workflow): commit and lock the QA
+	// role's tests, then open the coder's sandbox.
+	ActionQATestsCheck      StepAction = "QA_TESTS_CHECK"
 	ActionPlanDispatch      StepAction = "PLAN_DISPATCH"
 	ActionPlanValidate      StepAction = "PLAN_VALIDATE"
 	ActionSelectUnit        StepAction = "SELECT_UNIT"
@@ -47,7 +50,7 @@ const (
 )
 
 var allActions = []StepAction{
-	ActionCommand, ActionImplementCheck, ActionTestCheck, ActionAcceptanceCheck,
+	ActionCommand, ActionImplementCheck, ActionTestCheck, ActionAcceptanceCheck, ActionQATestsCheck,
 	ActionPlanDispatch, ActionPlanValidate, ActionSelectUnit, ActionDispatch,
 	ActionEvaluateResult, ActionContinuation, ActionRunUnitValidation,
 	ActionUnitGates, ActionMoreWork, ActionPhaseValidation, ActionMorePhases,
@@ -123,6 +126,7 @@ var actionBindings = map[string]StepAction{
 	"IMPLEMENT_CHECK":   ActionImplementCheck,
 	"TEST_CHECK":        ActionTestCheck,
 	"ACCEPTANCE_CHECK":  ActionAcceptanceCheck,
+	"QA_TESTS_CHECK":    ActionQATestsCheck,
 	"PHASE_PLAN":        ActionPlanDispatch,
 	"PLAN_VALIDATE":     ActionPlanValidate,
 	"WORK_UNIT_PREPARE": ActionSelectUnit,
@@ -406,6 +410,11 @@ func (k RepoCheckpointKind) Valid() bool {
 	return false
 }
 
+// RepoCheckpointTests keys the git-gated workflow's QA test commit. It is
+// identified by its trailer like a checkpoint but is not a checkpoint
+// record (Valid reports it unknown).
+const RepoCheckpointTests RepoCheckpointKind = "TESTS"
+
 // Commit trailers identifying overseer checkpoints (PLAN Decision 12).
 const (
 	TrailerExecution  = "Overseer-Execution"
@@ -422,8 +431,13 @@ func CheckpointKey(executionID uuid.UUID, kind RepoCheckpointKind, target uuid.U
 
 // CheckpointMessage renders the commit message with identifying trailers.
 func CheckpointMessage(kind RepoCheckpointKind, key string, executionID uuid.UUID, subject string) string {
-	return fmt.Sprintf("overseer: %s checkpoint: %s\n\n%s: %s\n%s: %s\n",
-		strings.ToLower(string(kind)), subject, TrailerExecution, executionID, TrailerCheckpoint, key)
+	return CommitMessage(fmt.Sprintf("overseer: %s checkpoint: %s", strings.ToLower(string(kind)), subject), key, executionID)
+}
+
+// CommitMessage renders a commit message with the given first line and the
+// identifying trailers.
+func CommitMessage(firstLine, key string, executionID uuid.UUID) string {
+	return fmt.Sprintf("%s\n\n%s: %s\n%s: %s\n", firstLine, TrailerExecution, executionID, TrailerCheckpoint, key)
 }
 
 // CheckpointFailureAction is what a checkpoint failure means for

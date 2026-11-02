@@ -23,13 +23,14 @@ import (
 // nextUnit returns the unit to work on: this execution's in-progress unit
 // first (resume), else the lowest-sequence dependency-ready unit of the
 // current plan (WBS 16.20/16.21). deadlock = non-DONE units remain but none
-// is executable (WBS 16.61).
+// is executable (WBS 16.61). Units deferred by the project's task scope are
+// never selected and count as done.
 func (e *Engine) nextUnit(ctx context.Context, st *engineState) (u *wbs.WorkUnit, allDone, deadlock bool, err error) {
 	if st.plan == nil {
 		return nil, false, false, nil
 	}
 	allDone = len(st.units) > 0
-	for _, x := range st.units {
+	for _, x := range st.selectedUnits() {
 		if x.Status != wbs.WorkUnitStatusDONE {
 			allDone = false
 		}
@@ -47,7 +48,7 @@ func (e *Engine) nextUnit(ctx context.Context, st *engineState) (u *wbs.WorkUnit
 	if err != nil {
 		return nil, false, false, err
 	}
-	for _, x := range el {
+	for _, x := range wbs.SelectedUnits(el, st.scope) {
 		if x.Status == wbs.WorkUnitStatusPENDING || x.Status == wbs.WorkUnitStatusREADY {
 			if u == nil || x.Sequence < u.Sequence {
 				u = x
@@ -360,6 +361,15 @@ func (e *Engine) handleUnitValidation(ctx context.Context, st *engineState, step
 	if st.unit == nil {
 		return e.requireRecovery(ctx, st, step, "no work unit to validate", nil)
 	}
+	if st.gitGated() {
+		// The locked tests are verified before anything runs.
+		if stop, err := e.checkTestIntegrity(ctx, st, step); stop != nil || err != nil {
+			if err != nil {
+				return execution.StepResult{}, err
+			}
+			return *stop, nil
+		}
+	}
 	spec := st.unit.Specification
 	if spec == nil {
 		spec = &wbs.WorkUnitSpecification{}
@@ -389,6 +399,15 @@ func (e *Engine) handleUnitValidation(ctx context.Context, st *engineState, step
 	} else if run.Acceptance != nil && run.Acceptance.Outcome == execution.AcceptanceReviewRequired {
 		ev["acceptance"] = run.Acceptance.Verdicts
 		return e.requireRecovery(ctx, st, step, "acceptance criteria require manual review", ev)
+	}
+	if token == "FAIL" && st.gitGated() {
+		// A failed attempt is discarded: the next one starts from a clean
+		// checkout of the locked tests, told what failed.
+		log, err := e.failedAttempt(ctx, st, run)
+		if err != nil {
+			return execution.StepResult{}, err
+		}
+		refs.Detail = map[string]any{detailErrorLog: log}
 	}
 	if token == "FAIL" && st.statefileWorkflow() {
 		// The same failure over and over: the task is replanned (or, in a
@@ -572,7 +591,11 @@ func (e *Engine) checkpoint(ctx context.Context, st *engineState, step *persiste
 			return nil, err
 		}
 	}
-	c, cerr := e.d.Checkpointer.Create(ctx, st.cwd(), execution.CheckpointMessage(kind, key, st.rec.ID, subject))
+	msg := execution.CheckpointMessage(kind, key, st.rec.ID, subject)
+	if kind == execution.RepoCheckpointUnit && st.gitGated() && st.unit != nil {
+		msg = execution.CommitMessage(fmt.Sprintf("feat: completed task %s successfully", wbs.UnitKey(st.unit)), key, st.rec.ID)
+	}
+	c, cerr := e.d.Checkpointer.Create(ctx, st.cwd(), msg)
 	if faults.IsCrash(cerr) {
 		// A simulated process crash abandons the step (the PENDING row and
 		// any landed commit are reconciled after restart).

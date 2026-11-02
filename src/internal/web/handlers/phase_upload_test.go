@@ -197,3 +197,30 @@ func TestPhasesPageOffersReordering(t *testing.T) {
 		t.Fatalf("%s", body)
 	}
 }
+
+func TestPhasesPageTaskScope(t *testing.T) {
+	api, mux := orderRig(t)
+	// No task-scope response: the page offers MVP and FULL, selected.
+	body := serve(mux, http.MethodGet, "/projects/"+tpid+"/phases", nil).Body.String()
+	if !strings.Contains(body, `action="/projects/`+tpid+`/task-scope"`) || !strings.Contains(body, `value="FULL" checked`) ||
+		strings.Contains(body, `value="MVP" checked`) {
+		t.Fatalf("%s", body)
+	}
+	api.get["/api/v1/projects/"+tpid+"/task-scope"] = jsonResp(200, map[string]any{"scope": "MVP"})
+	body = serve(mux, http.MethodGet, "/projects/"+tpid+"/phases", nil).Body.String()
+	if !strings.Contains(body, `value="MVP" checked`) || strings.Contains(body, `value="FULL" checked`) {
+		t.Fatalf("%s", body)
+	}
+
+	api.do["PUT /api/v1/projects/"+tpid+"/task-scope"] = jsonResp(200, map[string]any{"scope": "MVP"})
+	rec := serve(mux, http.MethodPost, "/projects/"+tpid+"/task-scope", url.Values{"scope": {"MVP"}})
+	b, _ := api.bodies[len(api.bodies)-1].(map[string]any)
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "MVP+only") || b["scope"] != "MVP" {
+		t.Fatalf("%d %s %v", rec.Code, rec.Header().Get("Location"), b)
+	}
+	api.do["PUT /api/v1/projects/"+tpid+"/task-scope"] = errResp(400, "invalid_task_scope", "scope must be MVP or FULL", nil)
+	rec = serve(mux, http.MethodPost, "/projects/"+tpid+"/task-scope", url.Values{"scope": {"BOTH"}})
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "scope must be MVP or FULL") {
+		t.Fatalf("%d\n%s", rec.Code, rec.Body)
+	}
+}

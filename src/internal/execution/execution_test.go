@@ -635,8 +635,9 @@ func TestP1520Events(t *testing.T) {
 	// task replan + the task requeue (requested, applied) + the task
 	// analysis / fix (started, finished each) + the repeated action + pause
 	// after task (requested, cancelled, applied) + 7 MCP types and the
-	// state-authority cutover (Phase 19).
-	if len(AllEventTypes()) != 64 {
+	// state-authority cutover (Phase 19) + the git-gated workflow's tests
+	// baselined / tampered, sandbox reset and task promoted.
+	if len(AllEventTypes()) != 68 {
 		t.Fatalf("%d types", len(AllEventTypes()))
 	}
 	if _, err := ParseEventType("NOPE"); err == nil {

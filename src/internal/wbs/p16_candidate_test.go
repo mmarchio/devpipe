@@ -119,6 +119,26 @@ func TestP1619AtomicPolicy(t *testing.T) {
 	}
 }
 
+// A workflow the overseer accepts tasks in itself refuses MANUAL criteria
+// (every one is reported); COMMAND and TEST criteria pass.
+func TestValidateAutomatedChecks(t *testing.T) {
+	a, b := goodUnit("a", "ATOMIC"), goodUnit("b", "ATOMIC")
+	a.AcceptanceChecks = append(a.AcceptanceChecks, AcceptanceCheckSpec{Text: "tested", Verification: VerifyTest, Tests: []string{"TestA"}})
+	if p := ValidateAutomatedChecks(&PlanCandidate{Units: []CandidateUnit{a, b}}); len(p) != 0 {
+		t.Fatalf("automated checks rejected: %v", p)
+	}
+	b.AcceptanceChecks = append(b.AcceptanceChecks, AcceptanceCheckSpec{Text: "reviewed", Verification: VerifyManual},
+		AcceptanceCheckSpec{Text: "looks right", Verification: VerifyManual})
+	p := ValidateAutomatedChecks(&PlanCandidate{Units: []CandidateUnit{a, b}})
+	if len(p) != 2 || !hasCode(p, "b", ProblemManualCheck) || hasCode(p, "a", ProblemManualCheck) ||
+		p[0].Message[:len("acceptance check 2")] != "acceptance check 2" {
+		t.Fatalf("manual checks: %v", p)
+	}
+	if p := ValidateAutomatedChecks(nil); len(p) != 0 {
+		t.Fatalf("nil candidate: %v", p)
+	}
+}
+
 // P16-20 (16.16 scope).
 func TestP1620PlanScope(t *testing.T) {
 	u := goodUnit("a", "ATOMIC")

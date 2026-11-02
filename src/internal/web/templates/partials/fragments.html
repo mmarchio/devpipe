@@ -59,7 +59,7 @@
   {{if eq . "RESOLVE_RECOVERY"}}{{with $.ExecutionID}}<a class="button" href="/projects/{{$id}}/executions/{{.}}/recovery">Recovery…</a>{{end}}{{end}}
 {{else}}<span class="muted">No control actions are available in the current state.</span>{{end}}
 {{$base := print "/projects/" $id "/executions/" .ExecutionID "/recovery"}}{{$ops := .TaskOps}}
-{{if .ExecutionID}}<form class="inline" method="post" action="{{$base}}/analyze">{{template "csrf" $csrf}}<input type="hidden" name="back" value="overview"><button type="submit" class="secondary" data-pending="Analyzing…"{{if or (not $ops.Available) $ops.Running}} disabled{{end}}>Analyze task</button></form>
+{{if .ExecutionID}}<form class="inline" method="post" action="{{$base}}/analyze">{{template "csrf" $csrf}}<input type="hidden" name="back" value="overview"><button type="submit" class="secondary" data-pending="Analyzing…"{{if or (not $ops.Available) $ops.Running $ops.Split}} disabled{{end}}>Analyze task</button></form>
 <form class="inline" method="post" action="{{$base}}/fix">{{template "csrf" $csrf}}<input type="hidden" name="back" value="overview"><button type="submit" class="secondary" data-pending="Fixing…"{{if not $ops.FixEnabled}} disabled{{end}}>Fix task</button></form>
 {{else}}<button type="button" class="secondary" disabled>Analyze task</button> <button type="button" class="secondary" disabled>Fix task</button>{{end}}
 </div>{{end}}{{end}}

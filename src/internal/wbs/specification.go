@@ -23,6 +23,10 @@ type WorkUnitSpecification struct {
 	Validation       []ValidationSpec      `json:"validation,omitempty"`
 	AcceptanceChecks []AcceptanceCheckSpec `json:"acceptance_checks,omitempty"`
 	Paths            []string              `json:"paths,omitempty"`
+
+	// Scope is the task's release: MVP or FULL ("" = planned before tasks
+	// were categorized, treated as MVP).
+	Scope TaskScope `json:"scope,omitempty"`
 }
 
 // ValidationSpec is one deterministic validation command declared for a

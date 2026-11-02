@@ -185,6 +185,8 @@ func parseTasksMarkdown(md string) (*TaskDoc, error) {
 				t.Status = strings.ToUpper(val)
 			case "kind":
 				u.Kind = strings.ToUpper(val)
+			case "scope":
+				u.Scope = strings.ToUpper(val)
 			case "depends on":
 				if !strings.EqualFold(val, "none") && val != "" {
 					u.DependsOn = splitList(val)

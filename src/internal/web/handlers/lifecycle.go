@@ -231,6 +231,39 @@ func (c *Console) requeue(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/projects/"+pid(r), msg)
 }
 
+// clearProcesses — POST /projects/{id}/clear-processes with confirmation +
+// reason (Configuration page): the running work is interrupted and the
+// current task restarts from the beginning.
+func (c *Console) clearProcesses(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil || !checked(r, "confirm") || strings.TrimSpace(r.PostFormValue("reason")) == "" {
+		c.htmlError(w, r, http.StatusBadRequest, "CONFIRMATION_REQUIRED", "Clearing processes requires explicit confirmation and a reason.")
+		return
+	}
+	ov, ok := c.overview(w, r)
+	if !ok {
+		return
+	}
+	if ov.Execution == nil {
+		c.htmlError(w, r, http.StatusConflict, "NOT_REQUEUEABLE", "The project has no execution.")
+		return
+	}
+	var res struct {
+		Status string `json:"status"`
+		Task   string `json:"task"`
+	}
+	resp := c.d.API.Do(r, http.MethodPost, "/api/v1/projects/"+pid(r)+"/executions/"+ov.Execution.ID+"/clear-processes", nil, r.PostFormValue("reason"))
+	if !resp.OK() {
+		c.apiError(w, r, resp)
+		return
+	}
+	_ = resp.Decode(&res)
+	msg := "Processes cleared: task " + res.Task + " restarts from the beginning."
+	if res.Status == "REQUESTED" {
+		msg = "Processes cleared: task " + res.Task + " restarts from the beginning as soon as the interrupted step returns."
+	}
+	redirect(w, r, "/projects/"+pid(r)+"/config", msg)
+}
+
 // markReady — POST /projects/{id}/ready: the Phase 3 readiness operation
 // (DRAFT → READY when the server-side checks pass).
 func (c *Console) markReady(w http.ResponseWriter, r *http.Request) {

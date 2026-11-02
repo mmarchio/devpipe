@@ -33,6 +33,7 @@ var apiActions = map[string]access.Action{
 	"POST /api/v1/projects/{project}/executions/{execution}/resume":                  access.ActionLifecycleResume,
 	"POST /api/v1/projects/{project}/executions/{execution}/cancel":                  access.ActionLifecycleCancel,
 	"POST /api/v1/projects/{project}/executions/{execution}/requeue":                 access.ActionRecoveryAction,
+	"POST /api/v1/projects/{project}/executions/{execution}/clear-processes":         access.ActionRecoveryAction,
 	"POST /api/v1/projects/{project}/executions/{execution}/pause-after-task":        access.ActionLifecyclePause,
 	"POST /api/v1/projects/{project}/executions/{execution}/pause-after-task/cancel": access.ActionLifecyclePause,
 	"POST /api/v1/projects/{project}/executions/{execution}/task-ops/analyze":        access.ActionRecoveryAction,
@@ -48,6 +49,7 @@ var apiActions = map[string]access.Action{
 	"PATCH /api/v1/projects/{id}/phases/{phaseID}":   access.ActionPhaseUpdate,
 	"DELETE /api/v1/projects/{id}/phases/{phaseID}":  access.ActionPhaseUpdate,
 	"PUT /api/v1/projects/{id}/phases/order":         access.ActionPhaseUpdate,
+	"PUT /api/v1/projects/{id}/task-scope":           access.ActionPhaseUpdate,
 	"PUT /api/v1/projects/{id}/phases/{phaseID}/wbs": access.ActionWBSEdit,
 	// Roles / instructions (Phase 5).
 	"POST /api/v1/projects/{project}/roles":                                     access.ActionRoleEdit,

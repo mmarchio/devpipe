@@ -481,6 +481,7 @@ type taskOps struct {
 	Task        string `json:"task"`
 	Running     string `json:"running"`
 	Interrupted string `json:"interrupted"`
+	Split       bool   `json:"split"`
 	Analysis    *struct {
 		At            time.Time `json:"at"`
 		Fixable       bool      `json:"fixable"`

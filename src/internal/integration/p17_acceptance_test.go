@@ -125,7 +125,7 @@ func TestP17147Acceptance(t *testing.T) {
 		}
 		r.roles[k] = id
 	}
-	r.installWorkflow(t, false)
+	r.installWorkflow(t, p15Composed)
 	p := "/projects/" + pid
 	var st map[string]any
 	b.getJSON("/api/v1"+p+"/settings", &st)

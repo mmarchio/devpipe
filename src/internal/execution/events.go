@@ -42,6 +42,14 @@ const (
 	EventCheckpointFailed     EventType = "CHECKPOINT_FAILED"
 	EventCheckpointSkipped    EventType = "CHECKPOINT_SKIPPED"
 	EventUnitDone             EventType = "WORK_UNIT_DONE"
+	// Git-gated workflow: the QA role's tests were committed on
+	// task/<key> and their fingerprint recorded; the coder changed the
+	// locked tests (or moved HEAD) and the sandbox was discarded; a failed
+	// attempt's sandbox was discarded; a validated task reached main.
+	EventTestsBaselined EventType = "TESTS_BASELINED"
+	EventTestsTampered  EventType = "TESTS_TAMPERED"
+	EventSandboxReset   EventType = "SANDBOX_RESET"
+	EventTaskPromoted   EventType = "TASK_PROMOTED"
 	// EventUnitReplanned: the architect replanned a task the overseer's
 	// validation failed the same way repeatedly.
 	EventUnitReplanned EventType = "WORK_UNIT_REPLANNED"
@@ -126,6 +134,7 @@ var allEvents = []EventType{
 	EventPauseAfterTaskRequested, EventPauseAfterTaskCancelled, EventPauseAfterTaskApplied,
 	EventMCPProgress, EventMCPBlocker, EventMCPResult, EventMCPTransitionRequested, EventMCPRetryRequested,
 	EventMCPContextResetRequest, EventMCPResultMissing, EventStateAuthorityCutover,
+	EventTestsBaselined, EventTestsTampered, EventSandboxReset, EventTaskPromoted,
 }
 
 // AllEventTypes returns every type in declaration order.

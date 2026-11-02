@@ -134,7 +134,7 @@ func (c *Console) createProject(w http.ResponseWriter, r *http.Request) {
 		"worker_provider": r.PostFormValue("worker_provider"), "worker_model": r.PostFormValue("worker_model"),
 		"compression_provider": r.PostFormValue("compression_provider"), "compression_model": r.PostFormValue("compression_model"),
 		"context_window": atoi(r.PostFormValue("context_window")), "context_threshold": threshold, "planning": planning,
-		"use_git": checked(r, "use_git"),
+		"use_git": checked(r, "use_git"), "workflow": r.PostFormValue("workflow"),
 	}
 	resp := c.d.API.Do(r, http.MethodPost, "/api/v1/console/projects", body, "")
 	if !resp.OK() {

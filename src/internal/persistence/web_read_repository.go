@@ -175,6 +175,7 @@ type WorkUnitRow struct {
 	Sequence    int
 	Key         string
 	Kind        string
+	Scope       string
 	Name        string
 	Status      string
 	Deps        []string

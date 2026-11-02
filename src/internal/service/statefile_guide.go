@@ -223,10 +223,13 @@ func OutputFormatSkill(projectName string, format worker.ResponseFormat) string 
 // and submits every result through the overseer MCP server; no statefile
 // is read or written.
 func RenderMCPGuide(m state.StateMachineSnapshot, roleKeys []string, commands map[string]string) string {
-	rolesOf := map[string]string{}
+	rolesOf, has := map[string]string{}, map[string]bool{}
 	for _, st := range m.States {
 		rolesOf[st.Key] = strings.Join(st.Roles, ", then ")
+		has[st.Key] = true
 	}
+	// v4: the overseer tests and accepts every task itself.
+	automated := has["ACCEPTANCE_CHECK"] && !has["ACCEPTANCE"]
 	cmd := func(stateKey, fallback string) string {
 		if c := commands[stateKey]; c != "" {
 			return "`" + c + "`"
@@ -255,14 +258,35 @@ func RenderMCPGuide(m state.StateMachineSnapshot, roleKeys []string, commands ma
 	fmt.Fprintf(&b, "| %s | %s | None: save the skill given in the command and follow it. |\n", cmd("SKILL", "create the <project>-output-format skill"), rolesOf["SKILL"])
 	fmt.Fprintf(&b, "| %s | %s | PLAN: status COMPLETE and `plan` with every atomic, testable task of the phase, from the phase WBS (`get_context`). |\n",
 		cmd("PLAN", "plan phase <N>"), rolesOf["PLAN"])
-	fmt.Fprintf(&b, "| %s | %s | ACCEPTANCE: COMPLETE accepts and archives the finished task; the overseer loads the next one. |\n",
-		cmd("ACCEPTANCE", "have the project manager perform acceptance tasks"), rolesOf["ACCEPTANCE"])
+	if !automated {
+		fmt.Fprintf(&b, "| %s | %s | ACCEPTANCE: COMPLETE accepts and archives the finished task; the overseer loads the next one. |\n",
+			cmd("ACCEPTANCE", "have the project manager perform acceptance tasks"), rolesOf["ACCEPTANCE"])
+	}
+	if has["QA_TESTS"] {
+		fmt.Fprintf(&b, "| %s | %s | IMPLEMENT: COMPLETE with a summary naming the test files written; INCOMPLETE, BLOCKED or FAILED otherwise. |\n",
+			cmd("QA_TESTS", "write the tests for task <KEY>"), rolesOf["QA_TESTS"])
+	}
 	fmt.Fprintf(&b, "| %s / %s | %s | IMPLEMENT: COMPLETE, INCOMPLETE, BLOCKED or FAILED, with a summary of the changes. |\n",
 		cmd("IMPLEMENT", "implement task <KEY>"), cmd("CONTINUE", "continue"), rolesOf["IMPLEMENT"])
-	fmt.Fprintf(&b, "| %s | %s | TEST: `criteria_met` (one true/false per acceptance check, in order); COMPLETE only when all are met. |\n",
-		cmd("TEST", "test task <KEY>"), rolesOf["TEST"])
-	fmt.Fprintf(&b, "| %s | %s | PLAN: exactly the replanned task, its key, kind and dependencies unchanged. |\n",
+	if !automated {
+		fmt.Fprintf(&b, "| %s | %s | TEST: `criteria_met` (one true/false per acceptance check, in order); COMPLETE only when all are met. |\n",
+			cmd("TEST", "test task <KEY>"), rolesOf["TEST"])
+	}
+	fmt.Fprintf(&b, "| %s | %s | PLAN: the replanned task, its key, kind and dependencies unchanged, plus any new sub-tasks it is split into (they run first). |\n",
 		cmd("REPLAN", "have the architect replan task <KEY>"), rolesOf["REPLAN"])
+	if has["QA_TESTS"] {
+		b.WriteString("\nGit-gated workflow: every task starts on its own branch `task/<KEY>` from `main`. The tester writes the task's tests " +
+			"first; the overseer commits them and locks them by fingerprint. The engineer then works on `sandbox/<KEY>` and must make the locked " +
+			"tests pass without creating, editing, renaming or deleting any test file, committing, or switching branches: the overseer checks " +
+			"the tests before validating and discards the whole sandbox when they changed or validation fails. A validated task is committed " +
+			"and fast-forwarded into `main`.\n")
+	}
+	if automated {
+		b.WriteString("\nThe overseer tests and accepts every task itself: after `implement task <KEY>` it runs the task's validation and its " +
+			"COMMAND and TEST acceptance criteria, and a task that passes is accepted and archived. There is no test or acceptance command, " +
+			"and a plan may not declare MANUAL criteria. A result given only in the reply is not read.\n")
+		return b.String()
+	}
 	b.WriteString("\nThe overseer validates every task itself before acceptance. A result given only in the reply is not read.\n")
 	return b.String()
 }

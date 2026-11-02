@@ -53,7 +53,7 @@ func p611MachinesForProject(t *testing.T, h *Harness, projectID string) int {
 
 // T6.3.1 — The default workflow seeds as data: the machine, its states, and
 // its transitions are all present as rows. The default is the statefile
-// workflow v3 (23 states, 40 transitions; see service.statefileTemplate).
+// workflow v4 (20 states, 34 transitions; see service.statefileTemplate).
 func TestP611SeedAsData(t *testing.T) {
 	h := NewHarness(t)
 	svc := p611Svc(t, h)
@@ -69,11 +69,11 @@ func TestP611SeedAsData(t *testing.T) {
 	if got := p611Count(t, h, "state_machines"); got != 1 {
 		t.Fatalf("state_machines rows = %d, want 1", got)
 	}
-	if got := p611Count(t, h, "workflow_states"); got != 23 {
-		t.Fatalf("workflow_states rows = %d, want 23", got)
+	if got := p611Count(t, h, "workflow_states"); got != 20 {
+		t.Fatalf("workflow_states rows = %d, want 20", got)
 	}
-	if got := p611Count(t, h, "state_transitions"); got != 40 {
-		t.Fatalf("state_transitions rows = %d, want 40", got)
+	if got := p611Count(t, h, "state_transitions"); got != 34 {
+		t.Fatalf("state_transitions rows = %d, want 34", got)
 	}
 }
 
@@ -98,11 +98,51 @@ func TestP611SeedIdempotent(t *testing.T) {
 	if got := p611Count(t, h, "state_machines"); got != 1 {
 		t.Fatalf("state_machines after re-seed = %d, want 1", got)
 	}
-	if got := p611Count(t, h, "workflow_states"); got != 23 {
-		t.Fatalf("workflow_states after re-seed = %d, want 23", got)
+	if got := p611Count(t, h, "workflow_states"); got != 20 {
+		t.Fatalf("workflow_states after re-seed = %d, want 20", got)
 	}
-	if got := p611Count(t, h, "state_transitions"); got != 40 {
-		t.Fatalf("state_transitions after re-seed = %d, want 40", got)
+	if got := p611Count(t, h, "state_transitions"); got != 34 {
+		t.Fatalf("state_transitions after re-seed = %d, want 34", got)
+	}
+}
+
+// The v3 statefile workflow stays seeded under its own name next to v4:
+// a project that copied v3 keeps its TEST and ACCEPTANCE states, and a new
+// copy gets v4.
+func TestP611StatefileV3KeptBesideV4(t *testing.T) {
+	h := NewHarness(t)
+	svc := p611Svc(t, h)
+	ctx := context.Background()
+
+	v3, err := svc.SeedStatefileV3Template(ctx)
+	if err != nil {
+		t.Fatalf("seed v3: %v", err)
+	}
+	v4, err := svc.SeedDefaultTemplate(ctx)
+	if err != nil {
+		t.Fatalf("seed v4: %v", err)
+	}
+	if v3 == v4 {
+		t.Fatal("v3 and v4 seeded as one machine")
+	}
+	if got := p611Count(t, h, "workflow_states"); got != 23+20 {
+		t.Fatalf("workflow_states = %d, want 43", got)
+	}
+	if got := p611Count(t, h, "state_transitions"); got != 40+34 {
+		t.Fatalf("state_transitions = %d, want 74", got)
+	}
+	keys := func(machineID string) string {
+		var s string
+		if err := h.DBScan(ctx, "SELECT string_agg(key, ',' ORDER BY key) FROM workflow_states WHERE machine_id = '"+machineID+"' AND key IN ('TEST', 'TEST_CHECK', 'ACCEPTANCE', 'ACCEPTANCE_CHECK')", &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if got := keys(v3); got != "ACCEPTANCE,ACCEPTANCE_CHECK,TEST,TEST_CHECK" {
+		t.Fatalf("v3 states %s", got)
+	}
+	if got := keys(v4); got != "ACCEPTANCE_CHECK" {
+		t.Fatalf("v4 states %s", got)
 	}
 }
 
@@ -192,7 +232,7 @@ func TestP611ProjectDoneTerminal(t *testing.T) {
 
 // T6.3.6 — The template copies to a project with fresh IDs and intact
 // structure: the copy belongs to the target project, has a new machine ID,
-// the same 23 states / 40 transitions (statefile workflow v3), fresh state IDs, and a remapped initial
+// the same 20 states / 34 transitions (statefile workflow v4), fresh state IDs, and a remapped initial
 // state pointing at the copy's own PROJECT_INIT.
 func TestP611CopyToProject(t *testing.T) {
 	h := NewHarness(t)
@@ -224,8 +264,8 @@ func TestP611CopyToProject(t *testing.T) {
 	if err := h.DBScan(ctx, fmt.Sprintf("SELECT count(*) FROM state_transitions WHERE machine_id = '%s'", copyID), &copyTransitions); err != nil {
 		t.Fatalf("count copy transitions: %v", err)
 	}
-	if copyStates != 23 || copyTransitions != 40 {
-		t.Fatalf("copy structure = %d states / %d transitions, want 23/40", copyStates, copyTransitions)
+	if copyStates != 20 || copyTransitions != 34 {
+		t.Fatalf("copy structure = %d states / %d transitions, want 20/34", copyStates, copyTransitions)
 	}
 	// Fresh IDs: the copy's state ids must be disjoint from the source's.
 	var overlap int
@@ -294,11 +334,11 @@ func TestP611SeedConcurrent(t *testing.T) {
 	if got := p611Count(t, h, "state_machines"); got != 1 {
 		t.Fatalf("state_machines after concurrent seed = %d, want 1", got)
 	}
-	if got := p611Count(t, h, "workflow_states"); got != 23 {
-		t.Fatalf("workflow_states after concurrent seed = %d, want 23", got)
+	if got := p611Count(t, h, "workflow_states"); got != 20 {
+		t.Fatalf("workflow_states after concurrent seed = %d, want 20", got)
 	}
-	if got := p611Count(t, h, "state_transitions"); got != 40 {
-		t.Fatalf("state_transitions after concurrent seed = %d, want 40", got)
+	if got := p611Count(t, h, "state_transitions"); got != 34 {
+		t.Fatalf("state_transitions after concurrent seed = %d, want 34", got)
 	}
 }
 

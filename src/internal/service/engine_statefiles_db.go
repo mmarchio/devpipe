@@ -24,9 +24,19 @@ import (
 // Overseer picks the next task itself, in plan order once its
 // dependencies are DONE.
 
+// scopeInstructions tells the planner how to categorize tasks: the
+// project may work on MVP tasks only.
+const scopeInstructions = "Categorize every task with scope: MVP when the minimum viable product needs it, FULL when only the " +
+	"full release does (polish, extras, non-essential features). An MVP task must not depend on a FULL task."
+
 // mcpInstructions is appended to every command: the token, and what
-// result the command expects.
-func mcpInstructions(token, stateKey string) string {
+// result the command expects. automated (the v4 workflow) leaves MANUAL
+// out of the acceptance criteria a plan may declare.
+func mcpInstructions(token, stateKey string, automated bool) string {
+	verifications := "COMMAND|TEST|MANUAL"
+	if automated {
+		verifications = "COMMAND|TEST"
+	}
 	var b strings.Builder
 	b.WriteString("\n\nThis project reports through the overseer MCP server: read the task and context with its tools " +
 		"(get_current_state, get_task, get_context, get_role, get_execution_history) — do not read or write statefiles — and pass token " +
@@ -35,16 +45,26 @@ func mcpInstructions(token, stateKey string) string {
 	case "TEST":
 		b.WriteString("When the tests are done, call submit_result with status COMPLETE when every acceptance check is met or INCOMPLETE " +
 			"otherwise, criteria_met with one true/false per acceptance check of get_task (in order), a summary, and the test output as evidence.")
+	case "PLAN_AMENDMENT":
+		b.WriteString("When the repair is planned, call submit_result with status COMPLETE and plan: {summary, units: [{key, name, kind: ATOMIC, " +
+			"scope: MVP|FULL, objective, instructions, acceptance_checks: [{text, verification: " + verifications + ", command: {program, args}, tests}], " +
+			"validation: [{program, args}], depends_on: [keys]}]} — only the new repair tasks, each with a new key; the current plan's tasks " +
+			"are kept and must not be resubmitted. " + scopeInstructions)
 	case "PLAN":
 		b.WriteString("When the phase is planned, call submit_result with status COMPLETE and plan: {summary, units: [{key, name, kind: ATOMIC, " +
-			"objective, instructions, acceptance_checks: [{text, verification: COMMAND|TEST|MANUAL, command: {program, args}, tests}], " +
-			"validation: [{program, args}], depends_on: [keys]}]} — every task of the phase, in order.")
+			"scope: MVP|FULL, objective, instructions, acceptance_checks: [{text, verification: " + verifications + ", command: {program, args}, tests}], " +
+			"validation: [{program, args}], depends_on: [keys]}]} — every task of the phase, in order. " + scopeInstructions)
 	case "REPLAN":
-		b.WriteString("Call submit_result with status COMPLETE and plan: {units: [the replanned task]} — exactly this task, with its key, kind " +
-			"and depends_on unchanged.")
+		b.WriteString("Call submit_result with status COMPLETE and plan: {units: [the replanned task]} — this task, with its key, kind " +
+			"and depends_on unchanged. " + splitInstructions)
 	case "ACCEPTANCE":
 		b.WriteString("Review the finished task (get_task, get_execution_history). Call submit_result with status COMPLETE to accept and " +
 			"archive it, or INCOMPLETE with the reason. With no finished task, submit COMPLETE. The overseer loads the next task.")
+	case "QA_TESTS":
+		b.WriteString("Write the task's specification tests only: test files (*_test.go, *.test.js, *.spec.js) that encode every acceptance " +
+			"check of get_task and fail until the task is implemented. Do not implement the task, do not commit and do not switch branches: " +
+			"the overseer commits the tests on the task branch and locks them, and the engineer may not change them. When you stop, call " +
+			"submit_result with status COMPLETE and a summary naming the test files, or INCOMPLETE, BLOCKED or FAILED.")
 	case "IMPLEMENT", "CONTINUE":
 		b.WriteString("When you stop, call submit_result with status COMPLETE (implemented), INCOMPLETE, BLOCKED or FAILED and a summary " +
 			"of the changes. Use report_progress for long work and report_blocker when you cannot continue.")
@@ -53,7 +73,7 @@ func mcpInstructions(token, stateKey string) string {
 			"optimizations: [...]}. Do not change anything.")
 	case "FIX_TASK":
 		b.WriteString("When done, call submit_result with status COMPLETE and a summary; when the task definition changed, include " +
-			"plan: {units: [the rewritten task]} with its key, kind and depends_on unchanged.")
+			"plan: {units: [the rewritten task]} with its key, kind and depends_on unchanged. " + splitInstructions)
 	default:
 		b.WriteString("This command takes no result.")
 		return b.String() + " Reply when it is done."
@@ -72,7 +92,11 @@ func (e *Engine) commandPrompt(ctx context.Context, st *engineState, cmd, stateK
 	if err != nil {
 		return nil, err
 	}
-	cmd += mcpInstructions(token, stateKey)
+	instr := stateKey
+	if stateKey == "PLAN" && e.planMode(ctx, st) == wbs.PlanKindAmendment {
+		instr = "PLAN_AMENDMENT"
+	}
+	cmd += mcpInstructions(token, instr, st.automatedAcceptance())
 	wp, err := compression.WorkerPromptFromCommand(cmd, e.d.Now().UTC())
 	if err != nil {
 		return nil, fmt.Errorf("command %q: %w", cmd, err)
@@ -193,7 +217,8 @@ func (e *Engine) implementResult(ctx context.Context, st *engineState, step *per
 // acceptanceResult: the project manager's ACCEPTANCE result accepts the
 // finished task, which is marked DONE (after its passing validation) and
 // archived; Overseer then claims the next task in plan order whose
-// dependencies are DONE (NEXT), or completes the phase.
+// dependencies are DONE (NEXT), or completes the phase. Tasks deferred by
+// the project's task scope are skipped.
 func (e *Engine) acceptanceResult(ctx context.Context, st *engineState, step *persistence.StepRecord, pend *uuid.UUID, refs persistence.StepRefs) (execution.StepResult, error) {
 	var txs []func(tx persistence.Transaction) error
 	var events []pendingEvent
@@ -203,7 +228,15 @@ func (e *Engine) acceptanceResult(ctx context.Context, st *engineState, step *pe
 	}
 	if prev := st.unit; prev != nil && prev.Status != wbs.WorkUnitStatusDONE {
 		uid := prev.ID
-		if pend == nil {
+		automated := st.automatedAcceptance()
+		validated := false
+		if automated {
+			var err error
+			if validated, err = e.justValidated(ctx, st, step, prev); err != nil {
+				return execution.StepResult{}, err
+			}
+		}
+		if pend == nil && !validated {
 			// Nothing was sent (a resumed execution): the task continues.
 			txs := []func(persistence.Transaction) error{func(tx persistence.Transaction) error { return e.d.Repo.ClaimUnit(ctx, tx, uid, st.rec.ID) }}
 			token := "NEXT"
@@ -212,17 +245,21 @@ func (e *Engine) acceptanceResult(ctx context.Context, st *engineState, step *pe
 			}
 			return e.advance(ctx, st, step, token, advanceOpts{Refs: refs, Outcome: token, SetUnit: true, UnitID: &uid, Tx: chainTx(txs)})
 		}
-		rep, err := e.mcpReport(ctx, *pend, persistence.ReportAcceptance)
-		if err != nil {
-			return execution.StepResult{}, err
-		}
-		if rep == nil {
-			return e.resultMissing(ctx, st, step, persistence.ReportAcceptance, refs)
-		}
 		key := wbs.UnitKey(prev)
-		if rep.Status != persistence.ReportComplete {
-			return e.statefileRetry(ctx, st, step, fmt.Sprintf("task %s was not accepted (%s: %s); submit an ACCEPTANCE result with status COMPLETE once it is",
-				key, rep.Status, rep.Summary), refs)
+		refs.Detail = map[string]any{"archived": key}
+		if !automated {
+			rep, err := e.mcpReport(ctx, *pend, persistence.ReportAcceptance)
+			if err != nil {
+				return execution.StepResult{}, err
+			}
+			if rep == nil {
+				return e.resultMissing(ctx, st, step, persistence.ReportAcceptance, refs)
+			}
+			if rep.Status != persistence.ReportComplete {
+				return e.statefileRetry(ctx, st, step, fmt.Sprintf("task %s was not accepted (%s: %s); submit an ACCEPTANCE result with status COMPLETE once it is",
+					key, rep.Status, rep.Summary), refs)
+			}
+			refs.Detail["report_id"] = rep.ID.String()
 		}
 		tx, ev, stop, err := e.finishUnit(ctx, st, step, prev)
 		if stop != nil || err != nil {
@@ -231,13 +268,13 @@ func (e *Engine) acceptanceResult(ctx context.Context, st *engineState, step *pe
 			}
 			return *stop, nil
 		}
-		dispatch := *pend
+		// The acceptance command's dispatch archives the task; the
+		// overseer's own acceptance (v4) has none.
 		archive := func(tx persistence.Transaction) error {
-			return e.mcp.repo.ArchiveUnit(ctx, tx, uid, &dispatch, e.d.Now())
+			return e.mcp.repo.ArchiveUnit(ctx, tx, uid, pend, e.d.Now())
 		}
 		txs, events = append(txs, tx, archive), append(events, ev)
 		done[uid] = true
-		refs.Detail = map[string]any{"archived": key, "report_id": rep.ID.String()}
 	}
 	deps, err := e.d.Repo.UnitDependencies(ctx, nil, st.plan.ID)
 	if err != nil {
@@ -248,7 +285,7 @@ func (e *Engine) acceptanceResult(ctx context.Context, st *engineState, step *pe
 	var next *wbs.WorkUnit
 	var waiting []string
 	for _, u := range units {
-		if done[u.ID] {
+		if done[u.ID] || wbs.Deferred(u, st.scope) {
 			continue
 		}
 		ready := true
@@ -273,6 +310,28 @@ func (e *Engine) acceptanceResult(ctx context.Context, st *engineState, step *pe
 	txs = append(txs, func(tx persistence.Transaction) error { return e.d.Repo.ClaimUnit(ctx, tx, nid, st.rec.ID) })
 	events = append(events, pendingEvent{Type: execution.EventUnitClaimed, Payload: map[string]any{"work_unit_id": nid.String(), "sequence": next.Sequence, "name": next.Name}})
 	return e.advance(ctx, st, step, "NEXT", advanceOpts{Refs: refs, Outcome: "NEXT", SetUnit: true, UnitID: &nid, Tx: chainTx(txs), Events: events})
+}
+
+// justValidated reports whether the step that led to this acceptance
+// check (v4) passed the task's overseer validation: then the task is
+// accepted. Reached any other way (a resumed execution), the task is
+// validated again first; finishUnit still requires the passing run.
+func (e *Engine) justValidated(ctx context.Context, st *engineState, step *persistence.StepRecord, u *wbs.WorkUnit) (bool, error) {
+	if u.Status != wbs.WorkUnitStatusVALIDATING {
+		return false, nil
+	}
+	steps, _, err := e.d.Repo.ListSteps(ctx, st.rec.ID, -1, 0)
+	if err != nil {
+		return false, err
+	}
+	for i := len(steps) - 1; i >= 0; i-- {
+		s := steps[i]
+		if s.ID == step.ID || s.Status != execution.StepApplied {
+			continue
+		}
+		return s.Action == execution.ActionRunUnitValidation && s.Outcome == "PASS" && s.WorkUnitID != nil && *s.WorkUnitID == u.ID, nil
+	}
+	return false, nil
 }
 
 // planCandidate reads the planner's PLAN result as the plan candidate.
@@ -313,7 +372,13 @@ func (e *Engine) planCandidate(ctx context.Context, st *engineState, dispatchID 
 	}
 	pc = withoutOtherPhases(pc, other)
 	if mode == wbs.PlanKindAmendment {
-		pc = withoutCarried(pc, st.units)
+		submitted := len(pc.Units)
+		if pc = withoutCarried(pc, st.units); len(pc.Units) == 0 && submitted > 0 {
+			reject("ONLY_EXISTING_TASKS", fmt.Sprintf("this is an amendment of the phase plan after its validation failed: the current plan's "+
+				"tasks are kept as they are, and all %d submitted tasks reuse their keys. Submit only the new repair tasks that fix the failure, "+
+				"each with a new key (they may depend on existing tasks)", submitted))
+			return nil, nil
+		}
 	}
 	if rec.Payload, err = json.Marshal(pc); err != nil {
 		return nil, err
@@ -321,38 +386,47 @@ func (e *Engine) planCandidate(ctx context.Context, st *engineState, dispatchID 
 	return pc, nil
 }
 
-// replannedUnit reads the rewritten task of a REPLAN or FIX_TASK result
-// for the dispatch. ok is false when the result carries no task (a fix
-// that left the definition as it was); problem is non-empty when the
-// result is missing or does not hold exactly the current task.
-func (e *Engine) replannedUnit(ctx context.Context, st *engineState, dispatchID *uuid.UUID) (u wbs.CandidateUnit, ok bool, problem string, err error) {
+// replannedUnits reads the rewritten task of a REPLAN or FIX_TASK result
+// for the dispatch, and the sub-tasks it was split into (in submitted
+// order, possibly none). ok is false when the result carries no task (a
+// fix that left the definition as it was); problem is non-empty when the
+// result is missing or does not hold the current task exactly once.
+func (e *Engine) replannedUnits(ctx context.Context, st *engineState, dispatchID *uuid.UUID) (u wbs.CandidateUnit, parts []wbs.CandidateUnit, ok bool, problem string, err error) {
 	key := wbs.UnitKey(st.unit)
 	if dispatchID == nil {
-		return u, false, "no replan command to read", nil
+		return u, nil, false, "no replan command to read", nil
 	}
 	rep, err := e.mcpReport(ctx, *dispatchID, persistence.ReportPlan)
 	if err != nil || rep == nil {
-		return u, false, "no replanned task " + key + " was submitted: call submit_result with the plan", err
+		return u, nil, false, "no replanned task " + key + " was submitted: call submit_result with the plan", err
 	}
 	if rep.Status != persistence.ReportComplete {
-		return u, false, "the replan was reported " + rep.Status + ": " + rep.Summary, nil
+		return u, nil, false, "the replan was reported " + rep.Status + ": " + rep.Summary, nil
 	}
 	p, found := rep.Evidence["plan"]
 	if !found {
-		return u, false, "", nil
+		return u, nil, false, "", nil
 	}
 	raw, err := json.Marshal(p)
 	if err != nil {
-		return u, false, "", err
+		return u, nil, false, "", err
 	}
 	pc, derr := wbs.DecodePlanCandidate(raw)
 	if derr != nil {
-		return u, false, "the submitted plan is malformed: " + derr.Error(), nil
+		return u, nil, false, "the submitted plan is malformed: " + derr.Error(), nil
 	}
-	if len(pc.Units) != 1 || pc.Units[0].Key != key {
-		return u, false, fmt.Sprintf("the submitted plan must hold exactly task %s", key), nil
+	n := 0
+	for _, x := range pc.Units {
+		if x.Key == key {
+			u, n = x, n+1
+		} else {
+			parts = append(parts, x)
+		}
 	}
-	return pc.Units[0], true, "", nil
+	if n != 1 {
+		return u, nil, false, fmt.Sprintf("the submitted plan must hold task %s exactly once (plus any sub-tasks it is split into)", key), nil
+	}
+	return u, parts, true, "", nil
 }
 
 // analysisResult reads the architect's ANALYSIS result.

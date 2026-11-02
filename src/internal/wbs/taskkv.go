@@ -17,6 +17,7 @@ import (
 //	task: <KEY> — <task name>
 //	status: TODO | ACTIVE | COMPLETE | DONE
 //	kind: ATOMIC | COMPOSITION | INTEGRATION | VALIDATION
+//	scope: MVP | FULL
 //	depends_on: none | <KEY>, <KEY>
 //	paths: <relative path>, <relative path>
 //	single_invocation: yes | no
@@ -35,7 +36,7 @@ var (
 	kvLineRE    = regexp.MustCompile(`^([a-z][a-z_]*):(?:\s(.*))?$`)
 	kvTaskRE    = regexp.MustCompile(`^([A-Za-z0-9._-]+)\s*(?:—|–|-|:)\s*(.+?)\s*$`)
 	kvDetectRE  = regexp.MustCompile(`^[a-z][a-z_]*:(\s|$)`)
-	kvTaskField = map[string]bool{"status": true, "kind": true, "depends_on": true, "paths": true, "single_invocation": true,
+	kvTaskField = map[string]bool{"status": true, "kind": true, "scope": true, "depends_on": true, "paths": true, "single_invocation": true,
 		"objective": true, "instructions": true, "criterion": true, "required_test": true, "validation": true}
 )
 
@@ -116,6 +117,8 @@ func ParseTasksKeyValue(content string) (*TaskDoc, error) {
 			t.Status = strings.ToUpper(val)
 		case "kind":
 			u.Kind = strings.ToUpper(val)
+		case "scope":
+			u.Scope = strings.ToUpper(val)
 		case "depends_on":
 			if !strings.EqualFold(val, "none") && val != "" {
 				u.DependsOn = splitList(val)

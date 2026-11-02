@@ -882,7 +882,7 @@ func (c *Console) configIndex(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	c.render(w, r, http.StatusOK, "config", viewmodels.Page{Shell: c.projectShell(r, "Configuration", ov)})
+	c.render(w, r, http.StatusOK, "config", viewmodels.Page{Shell: c.projectShell(r, "Configuration", ov), Data: ov})
 }
 
 // configVersion reads the configuration version from a guarded GET.

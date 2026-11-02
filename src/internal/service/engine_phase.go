@@ -26,7 +26,7 @@ func (e *Engine) handlePhaseValidation(ctx context.Context, st *engineState, ste
 	if work == nil {
 		return e.requireRecovery(ctx, st, step, "no phase to validate", nil)
 	}
-	if !wbs.PhaseCompletionEligible(st.plan, st.units) {
+	if !st.phaseWorkDone() {
 		return e.requireRecovery(ctx, st, step, "phase validation reached with non-DONE current-plan units", e.unitEvidence(st))
 	}
 	pid := work.ID
@@ -86,7 +86,7 @@ func (st *engineState) reusablePlan() bool {
 	if st.plan == nil || st.plan.WBSVersion != st.wbsVer || st.plan.Status == wbs.PlanStatusGENERATING || st.plan.Status == wbs.PlanStatusFAILED {
 		return false
 	}
-	return !wbs.PhaseCompletionEligible(st.plan, st.units)
+	return !st.phaseWorkDone()
 }
 
 // ---------------------------------------------------------------------------

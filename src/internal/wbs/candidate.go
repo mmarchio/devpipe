@@ -29,6 +29,8 @@ type CandidateUnit struct {
 	DependsOn        []string              `json:"depends_on,omitempty"`
 	Paths            []string              `json:"paths,omitempty"`
 	SingleInvocation bool                  `json:"single_invocation,omitempty"`
+	// Scope is MVP (minimum viable product) or FULL (full release).
+	Scope string `json:"scope,omitempty"`
 }
 
 // PlanCandidate is a planner-proposed decomposition of a phase.
@@ -86,6 +88,7 @@ const (
 	ProblemBadCommand       = "INVALID_VALIDATION_COMMAND"
 	ProblemNoProgram        = "PROGRAM_NOT_FOUND"
 	ProblemBadTestName      = "INVALID_TEST_NAME"
+	ProblemManualCheck      = "MANUAL_ACCEPTANCE_CHECK"
 )
 
 // PlanProblems is a validation report; nil/empty = valid.
@@ -347,6 +350,25 @@ func testable(u CandidateUnit) bool {
 	return false
 }
 
+// ValidateAutomatedChecks reports every MANUAL acceptance check: a
+// workflow in which the overseer alone accepts a task has no one to judge
+// one, so every criterion must be a COMMAND or TEST the overseer runs.
+func ValidateAutomatedChecks(c *PlanCandidate) PlanProblems {
+	var p PlanProblems
+	if c == nil {
+		return p
+	}
+	for _, u := range c.Units {
+		for i, ch := range u.AcceptanceChecks {
+			if ch.Verification == VerifyManual {
+				p.add(u.Key, ProblemManualCheck, "acceptance check %d: MANUAL verification is not allowed; the overseer accepts tasks itself, "+
+					"so state the criterion as a COMMAND or TEST it can run", i+1)
+			}
+		}
+	}
+	return p
+}
+
 // ValidatePlanScope reports scope violations (WBS 16.16): declared paths
 // must be clean, relative and inside the working directory; validation
 // commands must name a program (no shell strings with whitespace).
@@ -485,11 +507,18 @@ func appendCandidate(out []PlannedUnit, c *PlanCandidate, offset int) []PlannedU
 				Validation:                 append([]ValidationSpec(nil), u.Validation...),
 				AcceptanceChecks:           append([]AcceptanceCheckSpec(nil), u.AcceptanceChecks...),
 				Paths:                      append([]string(nil), u.Paths...),
+				Scope:                      candidateScope(u.Scope),
 			},
 			DependsOnKeys: append([]string(nil), u.DependsOn...),
 		})
 	}
 	return out
+}
+
+// candidateScope is a validated candidate scope ("" when absent).
+func candidateScope(token string) TaskScope {
+	s, _ := ParseTaskScope(token)
+	return s
 }
 
 func checkTexts(cs []AcceptanceCheckSpec) []string {

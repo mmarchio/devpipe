@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -58,6 +57,10 @@ type TaskOpsView struct {
 	// (the overseer stopped meanwhile); it can be run again.
 	Interrupted string            `json:"interrupted,omitempty"`
 	Analysis    *TaskAnalysisView `json:"analysis,omitempty"`
+	// Split: the last fix split the task into sub-tasks, which run when
+	// the execution resumes; until then the panel shows that fix and the
+	// task cannot be analyzed again.
+	Split bool `json:"split,omitempty"`
 	// FixEnabled: the latest analysis found optimizations that were not
 	// implemented yet, and nothing is running.
 	FixEnabled bool `json:"fix_enabled"`
@@ -94,11 +97,11 @@ func (e *Engine) TaskOps(ctx context.Context, projectID, executionID uuid.UUID) 
 	}
 	v := &TaskOpsView{}
 	if taskOpsAvailable(st) != nil {
-		return v, nil
+		return e.splitTaskOps(ctx, st, v)
 	}
 	v.Available, v.Task = true, wbs.UnitKey(st.unit)
-	if op, ok := e.taskOps.Load(executionID); ok {
-		v.Running = op.(string)
+	if run, ok := e.taskOps.Load(executionID); ok {
+		v.Running = run.(*taskOpRun).op
 	}
 	unit := &st.unit.ID
 	last := func(t execution.EventType) (*persistence.EventRef, error) {
@@ -146,6 +149,30 @@ func (e *Engine) TaskOps(ctx context.Context, projectID, executionID uuid.UUID) 
 	return v, nil
 }
 
+// splitTaskOps fills the panel after a fix split the current task: the
+// execution (still in recovery or paused) has no current task until it
+// resumes and loads the first sub-task, so the panel shows that fix.
+func (e *Engine) splitTaskOps(ctx context.Context, st *engineState, v *TaskOpsView) (*TaskOpsView, error) {
+	if (st.rec.Status != execution.ExecutionRecovery && st.rec.Status != execution.ExecutionPaused) || st.unit != nil || !st.statefileWorkflow() {
+		return v, nil
+	}
+	fixed, err := e.d.Repo.LastEvent(ctx, nil, st.rec.ID, execution.EventUnitFixed, nil)
+	if err != nil || fixed == nil || fixed.Payload["split_into"] == nil {
+		return v, err
+	}
+	claimed, err := e.d.Repo.LastEvent(ctx, nil, st.rec.ID, execution.EventUnitClaimed, nil)
+	if err != nil || (claimed != nil && claimed.Seq > fixed.Seq) {
+		return v, err
+	}
+	v.Available, v.Split = true, true
+	v.Task, _ = fixed.Payload["key"].(string)
+	f := &TaskFixView{At: fixed.At, DefinitionChanged: true}
+	f.Success, _ = fixed.Payload["success"].(bool)
+	f.Message, _ = fixed.Payload["message"].(string)
+	v.Fix = f
+	return v, nil
+}
+
 // AnalyzeTask starts the ARCHITECT's analysis of the current task (in the
 // background); see the TaskOps comment above.
 func (e *Engine) AnalyzeTask(ctx context.Context, projectID, executionID uuid.UUID, by string) error {
@@ -158,6 +185,13 @@ func (e *Engine) AnalyzeTask(ctx context.Context, projectID, executionID uuid.UU
 func (e *Engine) FixTask(ctx context.Context, projectID, executionID uuid.UUID, by string) error {
 	_, err := e.startTaskOp(ctx, projectID, executionID, TaskOpFix, by, "")
 	return err
+}
+
+// taskOpRun is an analysis or fix in progress; cancel interrupts it
+// (ClearProcesses).
+type taskOpRun struct {
+	op     string
+	cancel context.CancelCauseFunc
 }
 
 // taskOpRunning reports whether an analysis or fix of the execution is in
@@ -203,13 +237,16 @@ func (e *Engine) startTaskOp(ctx context.Context, projectID, executionID uuid.UU
 	if e.d.Worker == nil || e.d.CommandPrompts == nil {
 		return nil, fmt.Errorf("%w: no worker is configured", ErrTaskOpUnavailable)
 	}
-	if _, busy := e.taskOps.LoadOrStore(executionID, op); busy {
+	bg, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	if _, busy := e.taskOps.LoadOrStore(executionID, &taskOpRun{op: op, cancel: cancel}); busy {
+		cancel(nil)
 		return nil, fmt.Errorf("%w: an analysis or fix is already running", ErrTaskOpUnavailable)
 	}
 	started := false
 	defer func() {
 		if !started {
 			e.taskOps.Delete(executionID)
+			cancel(nil)
 		}
 	}()
 	st, err := e.load(ctx, executionID)
@@ -246,10 +283,10 @@ func (e *Engine) startTaskOp(ctx context.Context, projectID, executionID uuid.UU
 		return nil, translate(err)
 	}
 	started = true
-	bg := context.WithoutCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer cancel(nil)
 		defer e.taskOps.Delete(executionID)
 		defer containPanic(e.d.Logger, "task "+strings.ToLower(op), "execution_id", executionID.String())
 		var err error
@@ -301,9 +338,13 @@ func (e *Engine) runAnalysis(ctx context.Context, st *engineState, note string) 
 // success the task's attempt counters reset.
 func (e *Engine) runFix(ctx context.Context, st *engineState) error {
 	key := wbs.UnitKey(st.unit)
+	var split []string
 	record := func(success bool, msg string, changed bool) error {
 		payload := map[string]any{"work_unit_id": st.unit.ID.String(), "key": key, "success": success, "message": msg,
 			"definition_changed": changed}
+		if split != nil {
+			payload["split_into"] = split
+		}
 		if success {
 			payload["resets"] = requeueResets
 		}
@@ -321,30 +362,38 @@ func (e *Engine) runFix(ctx context.Context, st *engineState) error {
 	if cur.unit == nil || cur.unit.ID != st.unit.ID {
 		return record(false, "the execution no longer has task "+key+" as its current task", false)
 	}
-	spec, changed, problem, err := e.replannedTask(ctx, cur, &dispatch)
+	r, problem, err := e.replannedTask(ctx, cur, &dispatch)
 	if err != nil {
 		return record(false, err.Error(), false)
 	}
 	if problem != "" {
 		return record(false, "the fix submitted an unacceptable task definition (run the analysis again): "+problem, false)
 	}
-	if !changed {
+	if !r.changed {
 		return record(true, "Fix applied to the tests or code; the task definition is unchanged. Resume the execution to continue.", false)
 	}
 	uid := cur.unit.ID
 	err = e.inTx(ctx, nil, func(tx persistence.Transaction) error {
-		if err := e.d.Repo.ReplanUnit(ctx, tx, uid, spec); err != nil {
+		if _, err := e.adoptReplan(ctx, tx, uid, r); err != nil || !r.split() {
 			return err
 		}
-		err := e.d.Repo.SetUnitStatus(ctx, tx, uid, []wbs.WorkUnitStatus{wbs.WorkUnitStatusVALIDATING, wbs.WorkUnitStatusINCOMPLETE,
-			wbs.WorkUnitStatusEXECUTING}, wbs.WorkUnitStatusEXECUTING)
-		if err != nil && !errors.Is(err, persistence.ErrConflict) {
-			return err
+		// The execution stays where it is (recovery or paused) but
+		// resumes at ACCEPTANCE, which loads the first sub-task; an
+		// interrupted step of the split task is abandoned.
+		if cur.last != nil && cur.last.Status == execution.StepIntent {
+			if err := e.d.Repo.FinishStep(ctx, tx, cur.last.ID, execution.StepAbandoned, "SPLIT", "", persistence.StepRefs{}); err != nil {
+				return err
+			}
 		}
-		return nil
+		return e.toAcceptance(ctx, tx, cur, "SPLIT", persistence.PositionUpdate{})
 	})
 	if err != nil {
 		return record(false, "the new task definition could not be stored: "+err.Error(), false)
+	}
+	if r.split() {
+		split = r.partKeys()
+		return record(true, fmt.Sprintf("Fix applied: task %s was split into %s, which run first; %s runs after them. Resume the execution to continue.",
+			key, strings.Join(r.partKeys(), ", "), key), true)
 	}
 	return record(true, "Fix applied: the task definition was rewritten and adopted (key, kind and dependencies kept). Resume the execution to continue.", true)
 }
@@ -420,7 +469,8 @@ func (e *Engine) analysisCommand(ctx context.Context, st *engineState, note stri
 	}
 	fmt.Fprintf(&b, "\nAnalyze task %s end to end: its definition (get_task), the phase WBS and plan (get_context), its acceptance "+
 		"criteria, required tests and validation commands, and the test cases and code they exercise. The overseer runs the validation "+
-		"commands itself, in %s, as %s. Look for optimizations to the task definition, its tests or the code that %s. Do not change anything yet. "+
+		"commands itself, in %s, as %s. Look for optimizations to the task definition, its tests or the code that %s — including splitting "+
+		"the task into smaller sub-tasks that can each pass on their own. Do not change anything yet. "+
 		"fixable is true only when the optimizations remove the cause.", key, st.cwd(), validationUser(), goal)
 	return b.String(), nil
 }
@@ -429,8 +479,8 @@ func (e *Engine) analysisCommand(ctx context.Context, st *engineState, note stri
 func fixCommand(st *engineState, key string) string {
 	return fmt.Sprintf("fix task %s\n\nAct as the ARCHITECT. Implement the optimizations of the last analysis of task %s "+
 		"(get_execution_history), and nothing else. You may change the task's tests and code, and its definition (keep its key, kind and "+
-		"dependencies). Do not mark the task done. The overseer runs the validation commands itself, in %s, as %s.",
-		key, key, st.cwd(), validationUser())
+		"dependencies). Do not mark the task done. The overseer runs the validation commands itself, in %s, as %s. %s",
+		key, key, st.cwd(), validationUser(), splitInstructions)
 }
 
 // evidenceText renders recovery evidence as sorted "key=value" pairs.

@@ -35,7 +35,7 @@ import (
 
 // p812Seeded is the number of global templates SeedDefaults creates (one
 // v1 version each): every entry of service.defaultTemplateSpecs.
-const p812Seeded = 25
+const p812Seeded = 26
 
 // p812Service wires the seeding service over the harness pool.
 func p812Service(t *testing.T, h *Harness) *service.PromptTemplateService {

@@ -90,6 +90,11 @@ func (e *Engine) guardRepository(ctx context.Context, st *engineState, op string
 	}
 	want.Branch = exp.Branch
 	ev["expected_head"], ev["expected_head_source"], ev["expected_branch"] = exp.Head, exp.Source, exp.Branch
+	if e.gitFlowPosition(ctx, st, got.Branch, got.Head, exp.Head) {
+		// The git-gated workflow's own branch move (or the crash window
+		// right after one, before it was recorded).
+		want.Branch, exp.Head = got.Branch, got.Head
+	}
 	identity, branch := execution.IdentityMismatch(want, got)
 	if identity != "" {
 		return stop(recovery.RepositoryIdentityMismatch, "repository identity mismatch: "+identity+"; "+op+" not performed", ev)

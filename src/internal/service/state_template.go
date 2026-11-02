@@ -38,12 +38,30 @@ type templateDef struct {
 
 // statefileTemplate is the default workflow new projects receive.
 // v2 added the output-format skill step (SKILL → ROUTE) every execution
-// starts with; v3 adds the replan of a task the overseer's validation keeps
-// failing the same way (VALIDATE → REPLAN → REPLAN_CHECK → IMPLEMENT).
-// Projects created earlier keep the workflow they copied.
-var statefileTemplate = templateDef{name: "Statefile Development Workflow v3",
-	description: "Command-driven development workflow; the team reports through the overseer MCP server",
+// starts with; v3 added the replan of a task the overseer's validation
+// keeps failing the same way (VALIDATE → REPLAN → REPLAN_CHECK →
+// IMPLEMENT); v4 drops the TESTER's TEST command and the PROJECT_MANAGER's
+// ACCEPTANCE command: the overseer's validation decides a task and
+// ACCEPTANCE_CHECK accepts it without asking the team. Projects created
+// earlier keep the workflow they copied.
+var statefileTemplate = templateDef{name: "Statefile Development Workflow v4",
+	description: "Command-driven development workflow; the team reports through the overseer MCP server and the overseer tests and accepts every task",
 	states:      defaultStateSpecs, transitions: defaultTransitionSpecs}
+
+// gitGatedTemplate is the opt-in git-gated TDD workflow (v5): the v4
+// workflow with the TESTER's specification tests written first on
+// task/<key> and locked by fingerprint, the coder working in
+// sandbox/<key> (discarded on tampering or a failed validation), and each
+// validated task fast-forwarded into main.
+var gitGatedTemplate = templateDef{name: "Git-Gated TDD Workflow v5",
+	description: "Test-first workflow: the tester's tests are committed and locked on a task branch, the coder works in a sandbox branch the overseer verifies and resets, and validated tasks are fast-forwarded into main",
+	states:      gitGatedStateSpecs, transitions: gitGatedTransitionSpecs}
+
+// statefileV3Template is the v3 statefile workflow (TEST and ACCEPTANCE
+// commands), kept under its name for the projects that run it.
+var statefileV3Template = templateDef{name: "Statefile Development Workflow v3",
+	description: "Command-driven development workflow; the team reports through the overseer MCP server",
+	states:      statefileV3StateSpecs, transitions: statefileV3TransitionSpecs}
 
 // composedTemplate is the earlier composed-prompt workflow (WBS 6.3),
 // kept under its original name for the projects that run it.
@@ -100,11 +118,131 @@ type transitionSpec struct {
 	to      string
 }
 
-// defaultStateSpecs enumerates the statefile workflow's states. Each
+// defaultStateSpecs enumerates the statefile workflow's states (v4). Each
+// action state sends one command (a CMD_ template rendered as is); the
+// team submits its result through the overseer MCP server and the *_CHECK
+// control states read it back to decide the transition. Testing and
+// acceptance are the overseer's own: VALIDATE runs the task's validation
+// and acceptance checks, and ACCEPTANCE_CHECK accepts a validated task,
+// archives it and loads the next one.
+func defaultStateSpecs() []stateSpec {
+	return []stateSpec{
+		{key: "PROJECT_INIT", kind: state.KindControl},
+		// "create the <project>-output-format skill": Hermes saves the
+		// project's required response formatting as a skill, then ROUTE
+		// picks the work (plan / accept / validate).
+		{key: "SKILL", kind: state.KindAction, template: "CMD_SKILL"},
+		{key: "ROUTE", kind: state.KindControl},
+		// "plan phase <N>": ARCHITECT and PLANNER submit the phase plan.
+		{key: "PLAN", kind: state.KindAction, template: "CMD_PLAN"},
+		{key: "PLAN_CHECK", kind: state.KindControl},
+		// Overseer acceptance: archive the validated task, load the next.
+		{key: "ACCEPTANCE_CHECK", kind: state.KindControl},
+		// ENGINEER: "implement task <K>" / "continue".
+		{key: "IMPLEMENT", kind: state.KindAction, template: "CMD_IMPLEMENT"},
+		{key: "CONTINUE", kind: state.KindAction, template: "CMD_CONTINUE"},
+		{key: "IMPLEMENT_CHECK", kind: state.KindControl},
+		// Overseer-run deterministic validation and acceptance checks.
+		{key: "VALIDATE", kind: state.KindValidation, template: "VALIDATE_WORK_UNIT"},
+		// ARCHITECT: "have the architect replan task <K>" after repeated
+		// identical validation failures; the check adopts the new task.
+		{key: "REPLAN", kind: state.KindAction, template: "CMD_REPLAN"},
+		{key: "REPLAN_CHECK", kind: state.KindControl},
+		{key: "PHASE_VALIDATE", kind: state.KindValidation, template: "PHASE_VALIDATE"},
+		{key: "PHASE_DONE", kind: state.KindControl},
+		{key: "MORE_PHASES", kind: state.KindDecision, template: "MORE_PHASES"},
+		{key: "FINAL_HARDENING", kind: state.KindControl},
+		{key: "HARDENING_FIX", kind: state.KindAction, template: "HARDENING_FIX"},
+		{key: "FINAL_VALIDATE", kind: state.KindValidation, template: "FINAL_VALIDATE"},
+		{key: "FINAL_CHECKPOINT", kind: state.KindControl},
+		{key: "PROJECT_DONE", kind: state.KindTerminal, terminal: true},
+	}
+}
+
+// defaultTransitionSpecs enumerates the statefile workflow's edges (v4).
+func defaultTransitionSpecs() []transitionSpec {
+	return []transitionSpec{
+		{from: "PROJECT_INIT", outcome: "PROCEED", to: "SKILL"},
+		{from: "SKILL", outcome: "SUBMIT", to: "ROUTE"},
+		{from: "ROUTE", outcome: "RETRY", to: "SKILL"},
+		{from: "ROUTE", outcome: "PROCEED", to: "PLAN"},
+		{from: "ROUTE", outcome: "PLAN_REQUIRED", to: "PLAN"},
+		{from: "ROUTE", outcome: "PLAN_READY", to: "ACCEPTANCE_CHECK"},
+		{from: "ROUTE", outcome: "WORK_COMPLETE", to: "PHASE_VALIDATE"},
+		{from: "PLAN", outcome: "SUBMIT", to: "PLAN_CHECK"},
+		{from: "PLAN_CHECK", outcome: "ACCEPTED", to: "ACCEPTANCE_CHECK"},
+		{from: "PLAN_CHECK", outcome: "REJECTED", to: "PLAN"},
+		{from: "ACCEPTANCE_CHECK", outcome: "NEXT", to: "IMPLEMENT"},
+		{from: "ACCEPTANCE_CHECK", outcome: "TESTED", to: "VALIDATE"},
+		{from: "ACCEPTANCE_CHECK", outcome: "PHASE_COMPLETE", to: "PHASE_VALIDATE"},
+		{from: "IMPLEMENT", outcome: "SUBMIT", to: "IMPLEMENT_CHECK"},
+		{from: "CONTINUE", outcome: "SUBMIT", to: "IMPLEMENT_CHECK"},
+		{from: "IMPLEMENT_CHECK", outcome: "REPLIED", to: "VALIDATE"},
+		{from: "IMPLEMENT_CHECK", outcome: "INTERRUPTED", to: "CONTINUE"},
+		{from: "VALIDATE", outcome: "PASS", to: "ACCEPTANCE_CHECK"},
+		{from: "VALIDATE", outcome: "FAIL", to: "IMPLEMENT"},
+		{from: "VALIDATE", outcome: "REPLAN", to: "REPLAN"},
+		{from: "REPLAN", outcome: "SUBMIT", to: "REPLAN_CHECK"},
+		{from: "REPLAN_CHECK", outcome: "RETRY", to: "REPLAN"},
+		{from: "REPLAN_CHECK", outcome: "REPLANNED", to: "IMPLEMENT"},
+		{from: "PHASE_VALIDATE", outcome: "COMPLETE", to: "PHASE_DONE"},
+		{from: "PHASE_VALIDATE", outcome: "FAIL", to: "PLAN"},
+		{from: "PHASE_DONE", outcome: "EVALUATE", to: "MORE_PHASES"},
+		{from: "MORE_PHASES", outcome: "YES", to: "PLAN"},
+		{from: "MORE_PHASES", outcome: "NO", to: "FINAL_HARDENING"},
+		{from: "FINAL_HARDENING", outcome: "FIX", to: "HARDENING_FIX"},
+		{from: "HARDENING_FIX", outcome: "APPLY", to: "FINAL_HARDENING"},
+		{from: "FINAL_HARDENING", outcome: "COMPLETE", to: "FINAL_VALIDATE"},
+		{from: "FINAL_VALIDATE", outcome: "PASS", to: "FINAL_CHECKPOINT"},
+		{from: "FINAL_VALIDATE", outcome: "FAIL", to: "FINAL_HARDENING"},
+		{from: "FINAL_CHECKPOINT", outcome: "PROCEED", to: "PROJECT_DONE"},
+	}
+}
+
+// gitGatedStateSpecs enumerates the git-gated workflow's states (v5): the
+// v4 states plus the TESTER's QA_TESTS command and the overseer's
+// QA_TESTS_CHECK, which commits and locks the tests and opens the sandbox.
+func gitGatedStateSpecs() []stateSpec {
+	out := defaultStateSpecs()
+	for i, s := range out {
+		if s.key == "ACCEPTANCE_CHECK" {
+			qa := []stateSpec{
+				// TESTER: "write the tests for task <K>" on task/<K>.
+				{key: "QA_TESTS", kind: state.KindAction, template: "CMD_QA_TESTS"},
+				{key: "QA_TESTS_CHECK", kind: state.KindControl},
+			}
+			return append(out[:i+1], append(qa, out[i+1:]...)...)
+		}
+	}
+	return out
+}
+
+// gitGatedTransitionSpecs enumerates the git-gated workflow's edges (v5):
+// a task (new, requeued or replanned) starts with its tests; a validation
+// that finds the locked tests changed sends the coder back (TAMPERED).
+func gitGatedTransitionSpecs() []transitionSpec {
+	var out []transitionSpec
+	for _, t := range defaultTransitionSpecs() {
+		switch {
+		case t.from == "ACCEPTANCE_CHECK" && t.outcome == "NEXT", t.from == "REPLAN_CHECK" && t.outcome == "REPLANNED":
+			t.to = "QA_TESTS"
+		}
+		out = append(out, t)
+		if t.from == "VALIDATE" && t.outcome == "FAIL" {
+			out = append(out, transitionSpec{from: "VALIDATE", outcome: "TAMPERED", to: "IMPLEMENT"})
+		}
+	}
+	return append(out,
+		transitionSpec{from: "QA_TESTS", outcome: "SUBMIT", to: "QA_TESTS_CHECK"},
+		transitionSpec{from: "QA_TESTS_CHECK", outcome: "READY", to: "IMPLEMENT"},
+		transitionSpec{from: "QA_TESTS_CHECK", outcome: "RETRY", to: "QA_TESTS"})
+}
+
+// statefileV3StateSpecs enumerates the v3 statefile workflow's states. Each
 // action state sends one command (a CMD_ template rendered as is); the
 // team submits its result through the overseer MCP server and the *_CHECK
 // control states read it back to decide the transition.
-func defaultStateSpecs() []stateSpec {
+func statefileV3StateSpecs() []stateSpec {
 	return []stateSpec{
 		{key: "PROJECT_INIT", kind: state.KindControl},
 		// "create the <project>-output-format skill": Hermes saves the
@@ -145,9 +283,9 @@ func defaultStateSpecs() []stateSpec {
 	}
 }
 
-// defaultTransitionSpecs enumerates the statefile workflow's edges.
+// statefileV3TransitionSpecs enumerates the v3 statefile workflow's edges.
 // Outcomes are the explicit decision tokens for each branch.
-func defaultTransitionSpecs() []transitionSpec {
+func statefileV3TransitionSpecs() []transitionSpec {
 	return []transitionSpec{
 		// Every execution first has Hermes save the output-format skill.
 		{from: "PROJECT_INIT", outcome: "PROCEED", to: "SKILL"},
@@ -283,6 +421,16 @@ func (s *StateTemplateService) SeedDefaultTemplate(ctx context.Context) (string,
 	return s.seed(ctx, statefileTemplate)
 }
 
+// SeedGitGatedTemplate seeds the git-gated TDD workflow template (v5).
+func (s *StateTemplateService) SeedGitGatedTemplate(ctx context.Context) (string, error) {
+	return s.seed(ctx, gitGatedTemplate)
+}
+
+// SeedStatefileV3Template seeds the v3 statefile workflow template.
+func (s *StateTemplateService) SeedStatefileV3Template(ctx context.Context) (string, error) {
+	return s.seed(ctx, statefileV3Template)
+}
+
 // SeedComposedTemplate seeds the composed-prompt workflow template.
 func (s *StateTemplateService) SeedComposedTemplate(ctx context.Context) (string, error) {
 	return s.seed(ctx, composedTemplate)
@@ -313,6 +461,18 @@ func (s *StateTemplateService) seed(ctx context.Context, def templateDef) (strin
 // second copy into the same project returns the existing copy.
 func (s *StateTemplateService) CopyToProject(ctx context.Context, targetProjectID string) (string, error) {
 	return s.copyTo(ctx, targetProjectID, statefileTemplate)
+}
+
+// CopyGitGatedToProject materializes the git-gated TDD workflow (v5) into
+// the project (seeding it first).
+func (s *StateTemplateService) CopyGitGatedToProject(ctx context.Context, targetProjectID string) (string, error) {
+	return s.copyTo(ctx, targetProjectID, gitGatedTemplate)
+}
+
+// CopyStatefileV3ToProject materializes the v3 statefile workflow into the
+// project (seeding it first).
+func (s *StateTemplateService) CopyStatefileV3ToProject(ctx context.Context, targetProjectID string) (string, error) {
+	return s.copyTo(ctx, targetProjectID, statefileV3Template)
 }
 
 // CopyComposedToProject materializes the composed-prompt workflow into the

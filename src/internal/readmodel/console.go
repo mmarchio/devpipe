@@ -228,6 +228,7 @@ type UnitRow struct {
 	Sequence    int        `json:"sequence"`
 	Key         string     `json:"key"`
 	Kind        string     `json:"kind"`
+	Scope       string     `json:"scope,omitempty"`
 	Name        string     `json:"name"`
 	Status      string     `json:"status"`
 	Stage       UnitStage  `json:"stage"`

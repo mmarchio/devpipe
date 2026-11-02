@@ -41,3 +41,43 @@ func TestRenderMCPGuide(t *testing.T) {
 		}
 	}
 }
+
+// The v4 workflow's guide has no test or acceptance command: the overseer
+// tests and accepts every task, and MANUAL criteria are not allowed.
+func TestRenderMCPGuideAutomatedAcceptance(t *testing.T) {
+	var m state.StateMachineSnapshot
+	for _, s := range defaultStateSpecs() {
+		m.States = append(m.States, state.StateSnapshot{Key: s.key})
+	}
+	got := RenderMCPGuide(m, []string{"ENGINEER"}, nil)
+	for _, want := range []string{"| implement task <KEY> / continue |", "The overseer tests and accepts every task itself",
+		"a plan may not declare MANUAL criteria"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"test task <KEY>", "acceptance tasks", "criteria_met"} {
+		if strings.Contains(got, gone) {
+			t.Fatalf("the v4 guide still names %q:\n%s", gone, got)
+		}
+	}
+	m.States = nil
+	for _, s := range statefileV3StateSpecs() {
+		m.States = append(m.States, state.StateSnapshot{Key: s.key})
+	}
+	if got := RenderMCPGuide(m, nil, nil); !strings.Contains(got, "test task <KEY>") || !strings.Contains(got, "acceptance tasks") {
+		t.Fatalf("the v3 guide lost its commands:\n%s", got)
+	}
+}
+
+// mcpInstructions offers MANUAL criteria only where a tester judges them.
+func TestMCPInstructionsVerifications(t *testing.T) {
+	for _, key := range []string{"PLAN", "PLAN_AMENDMENT"} {
+		if got := mcpInstructions("tok", key, true); strings.Contains(got, "MANUAL") || !strings.Contains(got, "verification: COMMAND|TEST,") {
+			t.Fatalf("%s automated: %s", key, got)
+		}
+		if got := mcpInstructions("tok", key, false); !strings.Contains(got, "verification: COMMAND|TEST|MANUAL,") {
+			t.Fatalf("%s: %s", key, got)
+		}
+	}
+}

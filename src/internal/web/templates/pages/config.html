@@ -10,4 +10,16 @@
 <li><a href="/projects/{{$pid}}/config/checkpoint">Checkpoints</a> — REQUIRED / BEST_EFFORT / DISABLED</li>
 </ul>
 <p class="muted">Every form carries the version it was loaded at; a concurrent change is reported as a conflict instead of being overwritten.</p>
+<h2>Clear processes</h2>
+{{if .Data.HasAction "REQUEUE"}}{{$t := .Data.CurrentTask}}
+<p>Use this when the execution is stuck, for example on a worker command that never returns.{{if $t}} Task <strong>{{$t.Key}} {{$t.Name}}</strong> restarts from the beginning.{{end}}</p>
+<div class="banner warn"><strong>! Interrupts running work</strong>
+Clearing processes abandons the worker command in flight (it is cancelled and never resent), kills a running validation command, cancels a running task analysis or fix, and withdraws a requested pause after the task. The task is then requeued: the worker context is cleared (a new session; the previous one is deleted at the provider), the task is reset with its manual approvals withdrawn and its fix and retry counters reset, and the workflow returns to acceptance, where the overseer loads it again. Code changes already made in the repository are kept.</div>
+<form method="post" action="/projects/{{$pid}}/clear-processes">
+{{template "csrf" .Shell.CSRF}}
+<div class="field"><label for="clear-reason">Reason</label><input id="clear-reason" type="text" name="reason" required maxlength="2000"></div>
+<div class="field"><label><input type="checkbox" name="confirm" value="yes" required> Interrupt the running work and restart this task.</label></div>
+<button type="submit" data-pending="Clearing…">Clear processes</button>
+</form>
+{{else}}<p class="muted">Available while an execution of the statefile workflow has an active task.</p>{{end}}
 {{end}}

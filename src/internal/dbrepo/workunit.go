@@ -15,7 +15,7 @@ import (
 const workUnitColumns = `id, execution_plan_id, project_id, sequence, name, description, kind, status,
 	objective, implementation_instructions, acceptance_criteria, required_tests, constraints,
 	created_at, updated_at, started_at, completed_at,
-	unit_key, validation_commands, acceptance_checks, paths, carried_from_unit_id, claimed_execution_id, done_validation_run_id`
+	unit_key, validation_commands, acceptance_checks, paths, carried_from_unit_id, claimed_execution_id, done_validation_run_id, scope`
 
 // WorkUnitRepository implements work-unit persistence on PostgreSQL (WBS 2.16).
 // Transition enforcement belongs to a later state-machine phase; the marks
@@ -25,7 +25,7 @@ const workUnitColumnsAliased = `wu.id, wu.execution_plan_id, wu.project_id, wu.s
 	wu.objective, wu.implementation_instructions, wu.acceptance_criteria, wu.required_tests, wu.constraints,
 	wu.created_at, wu.updated_at, wu.started_at, wu.completed_at,
 	wu.unit_key, wu.validation_commands, wu.acceptance_checks, wu.paths, wu.carried_from_unit_id, wu.claimed_execution_id,
-	wu.done_validation_run_id`
+	wu.done_validation_run_id, wu.scope`
 
 type WorkUnitRepository struct {
 	exec executor
@@ -78,6 +78,7 @@ type scanWorkUnitScan struct {
 	carriedFrom *uuid.UUID
 	claimedBy   *uuid.UUID
 	doneRun     *uuid.UUID
+	scope       string
 }
 
 // scanWorkUnit scans a row (pgx.Row or pgx.Rows) and decodes it into a
@@ -89,7 +90,7 @@ func scanWorkUnit(row interface {
 	if err := row.Scan(&v.id, &v.planID, &v.projectID, &v.sequence, &v.name, &v.desc,
 		&v.kind, &v.status, &v.objective, &v.impl,
 		&v.accJSON, &v.reqJSON, &v.conJSON, &v.createdAt, &v.updatedAt, &v.startedAt, &v.completedAt,
-		&v.key, &v.valJSON, &v.checksJSON, &v.pathsJSON, &v.carriedFrom, &v.claimedBy, &v.doneRun); err != nil {
+		&v.key, &v.valJSON, &v.checksJSON, &v.pathsJSON, &v.carriedFrom, &v.claimedBy, &v.doneRun, &v.scope); err != nil {
 		return nil, err
 	}
 	k, err := wbs.ParseWorkUnitKind(v.kind)
@@ -120,6 +121,7 @@ func scanWorkUnit(row interface {
 		}
 	}
 	spec.Key = v.key
+	spec.Scope = wbs.TaskScope(v.scope)
 	for _, x := range []struct {
 		b   []byte
 		dst any
@@ -216,11 +218,11 @@ func (r *WorkUnitRepository) Create(ctx context.Context, u *wbs.WorkUnit) error 
 	_, err = r.exec.Exec(ctx,
 		`INSERT INTO work_units (id, execution_plan_id, project_id, sequence, name, description, kind, status,
 			objective, implementation_instructions, acceptance_criteria, required_tests, constraints, created_at, updated_at,
-			unit_key, validation_commands, acceptance_checks, paths, carried_from_unit_id, completed_at, done_validation_run_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+			unit_key, validation_commands, acceptance_checks, paths, carried_from_unit_id, completed_at, done_validation_run_id, scope)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
 		u.ID, u.ExecutionPlanID, projectID, u.Sequence, u.Name, u.Description, u.Kind.String(), u.Status.String(),
 		spec.Objective, spec.ImplementationInstructions, acc, req, con, u.CreatedAt.UTC(), u.CreatedAt.UTC(),
-		spec.Key, val, checks, paths, u.CarriedFromUnitID, u.CompletedAt, u.DoneValidationRunID)
+		spec.Key, val, checks, paths, u.CarriedFromUnitID, u.CompletedAt, u.DoneValidationRunID, wbs.UnitScope(u).String())
 	if err != nil {
 		return TranslateDBError("create work unit", err)
 	}

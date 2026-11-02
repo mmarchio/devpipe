@@ -105,7 +105,17 @@ type ProjectSetup struct {
 	// UseGit sets the checkpoint policies when CheckpointPolicy is empty:
 	// REQUIRED with git, DISABLED (the default) without.
 	UseGit bool `json:"use_git"`
+	// Workflow selects the project's workflow: "" or WorkflowStatefile
+	// (the default v4), or WorkflowGitGated (the git-gated TDD workflow,
+	// which always checkpoints to git).
+	Workflow string `json:"workflow"`
 }
+
+// Project workflows a setup may select.
+const (
+	WorkflowStatefile = "statefile"
+	WorkflowGitGated  = "git_gated"
+)
 
 // ProjectSetupService creates a fully configured project through the
 // Phase 3 project / settings services and the engine settings (P17-47).
@@ -186,6 +196,15 @@ func (s *ProjectSetupService) Validate(in ProjectSetup) map[string]string {
 	default:
 		f["checkpoint_policy"] = "must be REQUIRED, BEST_EFFORT or DISABLED"
 	}
+	switch in.Workflow {
+	case "", WorkflowStatefile:
+	case WorkflowGitGated:
+		if p := execution.CheckpointPolicy(in.CheckpointPolicy); p != "" && p != execution.CheckpointRequired {
+			f["checkpoint_policy"] = "the git_gated workflow requires REQUIRED"
+		}
+	default:
+		f["workflow"] = "must be " + WorkflowStatefile + " or " + WorkflowGitGated
+	}
 	return f
 }
 
@@ -218,7 +237,7 @@ func (s *ProjectSetupService) Create(ctx context.Context, in ProjectSetup) (*pro
 	}
 	es.CheckpointPolicy = execution.CheckpointPolicy(in.CheckpointPolicy)
 	if es.CheckpointPolicy == "" {
-		es.CheckpointPolicy = execution.CheckpointPolicyFor(in.UseGit)
+		es.CheckpointPolicy = execution.CheckpointPolicyFor(in.UseGit || in.Workflow == WorkflowGitGated)
 	}
 	hs.GroupCheckpointPolicy = string(execution.CheckpointPolicyFor(es.CheckpointPolicy.UsesGit()))
 	if err := s.engine.UpdateEngineSettings(ctx, p.ID, es, hs); err != nil {
@@ -228,7 +247,7 @@ func (s *ProjectSetupService) Create(ctx context.Context, in ProjectSetup) (*pro
 		return fail(err)
 	}
 	if s.init != nil {
-		if err := s.init.Initialize(ctx, p.ID); err != nil {
+		if err := s.init.InitializeWorkflow(ctx, p.ID, in.Workflow); err != nil {
 			return fail(err)
 		}
 	}
@@ -252,7 +271,7 @@ func ErrFieldsOf(err error) map[string]string {
 // (in order) a new project receives; each assigned role is allowed the
 // state. "plan phase <N>" is worked by the ARCHITECT, then the PLANNER.
 var DefaultStateRoles = map[string][]string{"SKILL": {"PROJECT_MANAGER"}, "REPLAN": {"ARCHITECT"}, "PLAN": {"ARCHITECT", "PLANNER"}, "ACCEPTANCE": {"PROJECT_MANAGER"},
-	"IMPLEMENT": {"ENGINEER"}, "CONTINUE": {"ENGINEER"}, "TEST": {"TESTER"}, "HARDENING_FIX": {"ENGINEER"},
+	"IMPLEMENT": {"ENGINEER"}, "CONTINUE": {"ENGINEER"}, "TEST": {"TESTER"}, "QA_TESTS": {"TESTER"}, "HARDENING_FIX": {"ENGINEER"},
 	"VALIDATE": {"TESTER"}, "PHASE_VALIDATE": {"TESTER"}}
 
 // ProjectInitializer gives a new project its executable configuration from
@@ -269,9 +288,15 @@ type ProjectInitializer struct {
 	Protocols persistence.ResponseProtocolRepository
 }
 
-// Initialize performs the initialization (each step idempotent where the
-// underlying service is).
+// Initialize performs the initialization with the default workflow (each
+// step idempotent where the underlying service is).
 func (in *ProjectInitializer) Initialize(ctx context.Context, projectID uuid.UUID) error {
+	return in.InitializeWorkflow(ctx, projectID, WorkflowStatefile)
+}
+
+// InitializeWorkflow performs the initialization with the selected
+// workflow ("" = the default).
+func (in *ProjectInitializer) InitializeWorkflow(ctx context.Context, projectID uuid.UUID, workflow string) error {
 	roles, err := in.Roles.InitializeProjectRoles(ctx, projectID.String())
 	if err != nil {
 		return fmt.Errorf("initialize roles: %w", err)
@@ -283,12 +308,15 @@ func (in *ProjectInitializer) Initialize(ctx context.Context, projectID uuid.UUI
 	// The default workflow template is seeded on first use (idempotent,
 	// advisory-locked), so a fresh installation can initialize projects
 	// without a separate seeding step (P18-20).
-	if _, err := in.Templates.SeedDefaultTemplate(ctx); err != nil {
+	copyWorkflow := in.Templates.CopyToProject
+	if workflow == WorkflowGitGated {
+		copyWorkflow = in.Templates.CopyGitGatedToProject
+	} else if _, err := in.Templates.SeedDefaultTemplate(ctx); err != nil {
 		return fmt.Errorf("seed default workflow template: %w", err)
 	}
-	mid, err := in.Templates.CopyToProject(ctx, projectID.String())
+	mid, err := copyWorkflow(ctx, projectID.String())
 	if err != nil {
-		return fmt.Errorf("copy default workflow: %w", err)
+		return fmt.Errorf("copy %s workflow: %w", workflowName(workflow), err)
 	}
 	machine, err := uuid.Parse(mid)
 	if err != nil {
@@ -346,4 +374,11 @@ func (in *ProjectInitializer) Initialize(ctx context.Context, projectID uuid.UUI
 func (s *ProjectSetupService) WithInitializer(in *ProjectInitializer) *ProjectSetupService {
 	s.init = in
 	return s
+}
+
+func workflowName(w string) string {
+	if w == "" {
+		return WorkflowStatefile
+	}
+	return w
 }

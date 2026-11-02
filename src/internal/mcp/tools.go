@@ -53,7 +53,7 @@ type resultArgs struct {
 	Summary        string         `json:"summary" jsonschema:"what was done and the outcome"`
 	CriteriaMet    []bool         `json:"criteria_met,omitempty" jsonschema:"test results: one true/false per acceptance check of the task, in order"`
 	Evidence       map[string]any `json:"evidence,omitempty" jsonschema:"supporting evidence such as test output, files changed or commands run"`
-	Plan           any            `json:"plan,omitempty" jsonschema:"plan results: {summary, units: [{key, name, kind, objective, acceptance_checks, validation, depends_on}]}"`
+	Plan           any            `json:"plan,omitempty" jsonschema:"plan results: {summary, units: [{key, name, kind, scope (MVP or FULL), objective, acceptance_checks, validation, depends_on}]}"`
 }
 
 type transitionArgs struct {

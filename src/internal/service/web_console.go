@@ -500,7 +500,7 @@ func unitRowOf(w persistence.WorkUnitRow, current *uuid.UUID) readmodel.UnitRow 
 	if blocking == nil {
 		blocking = []string{}
 	}
-	return readmodel.UnitRow{ID: w.ID.String(), Sequence: w.Sequence, Key: w.Key, Kind: w.Kind, Name: w.Name, Status: w.Status,
+	return readmodel.UnitRow{ID: w.ID.String(), Sequence: w.Sequence, Key: w.Key, Kind: w.Kind, Scope: w.Scope, Name: w.Name, Status: w.Status,
 		Stage: readmodel.StageOf(facts), Deps: deps, Blocking: blocking, Readiness: readinessLabel(w.Status, w.Blocking),
 		Attempts: w.Attempts, Validation: w.Validation, Checkpoint: w.Checkpoint, Current: current != nil && *current == w.ID,
 		StartedAt: w.StartedAt, CompletedAt: w.CompletedAt}

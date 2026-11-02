@@ -6,6 +6,7 @@
 //	POST /api/v1/projects/{project}/executions/{execution}/resume            (WBS 16.73)
 //	POST /api/v1/projects/{project}/executions/{execution}/cancel            (WBS 16.74)
 //	POST /api/v1/projects/{project}/executions/{execution}/requeue           restart the current task
+//	POST /api/v1/projects/{project}/executions/{execution}/clear-processes   interrupt running work, restart the current task
 //	POST /api/v1/projects/{project}/executions/{execution}/pause-after-task  pause before the next task's work
 //	POST /api/v1/projects/{project}/executions/{execution}/pause-after-task/cancel
 //	GET  /api/v1/projects/{project}/executions/{execution}/task-ops          task analysis / fix panel
@@ -58,6 +59,7 @@ func RegisterEngineRoutes(r *Router, eng *service.Engine, lifecycle *service.Lif
 		{http.MethodPost, ex + "/resume", api.lifecycleOp("resume")},
 		{http.MethodPost, ex + "/cancel", api.lifecycleOp("cancel")},
 		{http.MethodPost, ex + "/requeue", api.requeue},
+		{http.MethodPost, ex + "/clear-processes", api.clearProcesses},
 		{http.MethodPost, ex + "/pause-after-task", api.pauseAfterTask(true)},
 		{http.MethodPost, ex + "/pause-after-task/cancel", api.pauseAfterTask(false)},
 		{http.MethodGet, ex + "/task-ops", api.taskOps},
@@ -246,6 +248,32 @@ func (a *engineAPI) requeue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := a.eng.Requeue(r.Context(), ids[0], ids[1], "operator", reason)
+	if err != nil {
+		if errors.Is(err, service.ErrNotRequeueable) {
+			WriteError(w, r, NewConflictCode("not_requeueable", strings.TrimPrefix(err.Error(), service.ErrConflict.Error()+": ")))
+			return
+		}
+		WriteError(w, r, engineError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// clearProcesses interrupts the execution's running work (in-flight worker
+// call, validation, task analysis / fix), withdraws pending actions and
+// restarts the current task. The reason is the X-Overseer-Reason header.
+func (a *engineAPI) clearProcesses(w http.ResponseWriter, r *http.Request) {
+	ids, err := pathUUIDs(r, "project", "execution")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	reason := strings.TrimSpace(r.Header.Get(ReasonHeader))
+	if reason == "" {
+		WriteError(w, r, NewValidationCode("reason_required", "Clearing processes requires a reason ("+ReasonHeader+" header)."))
+		return
+	}
+	res, err := a.eng.ClearProcesses(r.Context(), ids[0], ids[1], "operator", reason)
 	if err != nil {
 		if errors.Is(err, service.ErrNotRequeueable) {
 			WriteError(w, r, NewConflictCode("not_requeueable", strings.TrimPrefix(err.Error(), service.ErrConflict.Error()+": ")))

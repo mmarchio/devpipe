@@ -44,11 +44,28 @@ type p16Options struct {
 	config func(*config.Config)
 	// noBootstrap leaves the project READY (tests that bootstrap later).
 	noBootstrap bool
-	// statefile runs the default statefile workflow instead of the
+	// statefile runs the v3 statefile workflow instead of the
 	// composed-prompt workflow (with the MCP server the team reports
-	// through enabled, unless noMCP).
+	// through enabled, unless noMCP); automated runs the default (v4)
+	// statefile workflow, in which the overseer tests and accepts tasks.
 	statefile bool
-	noMCP     bool
+	automated bool
+	// gitGated runs the git-gated TDD workflow (v5).
+	gitGated bool
+	noMCP    bool
+}
+
+// workflow is the workflow the options select.
+func (o p16Options) workflow() p15Workflow {
+	switch {
+	case o.gitGated:
+		return p15GitGated
+	case o.automated:
+		return p15StatefileV4
+	case o.statefile:
+		return p15StatefileV3
+	}
+	return p15Composed
 }
 
 func p16NewRig(t *testing.T) *p16Rig { return p16NewRigWith(t, p16Options{}) }
@@ -60,7 +77,7 @@ func p16NewRigWith(t *testing.T, o p16Options) *p16Rig {
 		phases = []p15Phase{{1, "Foundation", "PENDING", 1}}
 	}
 	cfg := o.config
-	if o.statefile && !o.noMCP {
+	if o.workflow().statefile() && !o.noMCP {
 		mcp := p19mcpConfig(t)
 		cfg = func(c *config.Config) {
 			if o.config != nil {
@@ -70,7 +87,7 @@ func p16NewRigWith(t *testing.T, o p16Options) *p16Rig {
 		}
 	}
 	h, g, srv := p15Harness(t, cfg)
-	base := p15BuildWorkflow(t, h, g, srv, phases, o.statefile)
+	base := p15BuildWorkflow(t, h, g, srv, phases, o.workflow())
 	r := &p16Rig{p15Rig: base}
 	p16Configure(t, r, o)
 	return r
@@ -155,7 +172,7 @@ func (r *p16Rig) planJSON(units ...p16Unit) string {
 		if deps == nil {
 			deps = []string{}
 		}
-		us = append(us, map[string]any{"key": u.key, "name": "Unit " + u.key, "kind": kind, "objective": "Deliver " + u.key,
+		us = append(us, map[string]any{"key": u.key, "name": "Unit " + u.key, "kind": kind, "scope": "MVP", "objective": "Deliver " + u.key,
 			"instructions": "Implement " + u.key, "acceptance_checks": checks, "validation": []any{cmd}, "depends_on": deps,
 			"paths": []string{"src/" + u.key}, "single_invocation": true})
 	}

@@ -1,9 +1,12 @@
 // Package gitcheckpoint creates and reconciles overseer-owned git
 // checkpoints (WBS 16.54, 16.80, 16.143). It is the only package allowed
-// to write to a project's repository history, and only through
-// `git add -A` + `git commit` — never checkout, rebase, stash or push,
-// and never a reset that moves HEAD or touches the working tree (the only
-// reset is `git reset -q -- <reserved paths>`, which unstages). Checkpoints are identified by the Overseer-Checkpoint trailer, so
+// to write to a project's repository history. Checkpoints use only
+// `git add -A` + `git commit` (the only reset is `git reset -q --
+// <reserved paths>`, which unstages). The git-gated workflow's branch
+// operations (flow.go) additionally check out, hard-reset and
+// fast-forward — only on main and the task's own task/<key> and
+// sandbox/<key> branches; nothing is ever rebased, stashed or pushed.
+// Checkpoints are identified by the Overseer-Checkpoint trailer, so
 // a crash after commit is reconciled instead of committing twice.
 package gitcheckpoint
 

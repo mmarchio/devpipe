@@ -31,6 +31,9 @@ const (
 	HeadFromFirstCheck     = "FIRST_CHECK"
 	HeadFromCheckpoint     = "CHECKPOINT"
 	HeadFromOperatorAccept = "OPERATOR_ACCEPT"
+	// HeadFromGitFlow: a git-gated workflow branch operation (task
+	// branch, sandbox reset, promotion to main) moved HEAD.
+	HeadFromGitFlow = "GIT_FLOW"
 )
 
 // ExpectedHeadRecord is one entry of an execution's append-only expected

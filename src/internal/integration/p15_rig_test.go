@@ -106,13 +106,25 @@ func p15NewRigWith(t *testing.T, phases []p15Phase, extra func(*config.Config)) 
 
 func p15Build(t *testing.T, h *Harness, g *hermestest.Gateway, srv *providertest.Server, phases []p15Phase) *p15Rig {
 	t.Helper()
-	return p15BuildWorkflow(t, h, g, srv, phases, false)
+	return p15BuildWorkflow(t, h, g, srv, phases, p15Composed)
 }
+
+// p15Workflow selects the workflow a rig installs.
+type p15Workflow int
+
+const (
+	p15Composed    p15Workflow = iota // the composed-prompt workflow
+	p15StatefileV3                    // the v3 statefile workflow (TEST and ACCEPTANCE commands)
+	p15StatefileV4                    // the default statefile workflow (the overseer tests and accepts)
+	p15GitGated                       // the git-gated TDD workflow (v5)
+)
+
+func (w p15Workflow) statefile() bool { return w != p15Composed }
 
 // p15BuildWorkflow builds the rig on the composed-prompt workflow, or —
 // statefile — on the default statefile workflow with its default role
 // assignments.
-func p15BuildWorkflow(t *testing.T, h *Harness, g *hermestest.Gateway, srv *providertest.Server, phases []p15Phase, statefile bool) *p15Rig {
+func p15BuildWorkflow(t *testing.T, h *Harness, g *hermestest.Gateway, srv *providertest.Server, phases []p15Phase, wf p15Workflow) *p15Rig {
 	t.Helper()
 	ctx := context.Background()
 	raw := h.App.DB().Raw()
@@ -150,7 +162,7 @@ func p15BuildWorkflow(t *testing.T, h *Harness, g *hermestest.Gateway, srv *prov
 		r.roles[rr.Key] = rr.ID
 	}
 
-	r.installWorkflow(t, statefile)
+	r.installWorkflow(t, wf)
 
 	// Phases + WBS versions.
 	for _, ph := range phases {
@@ -164,11 +176,11 @@ func p15BuildWorkflow(t *testing.T, h *Harness, g *hermestest.Gateway, srv *prov
 	return r
 }
 
-// installWorkflow copies the composed-prompt workflow (or, statefile, the
-// default statefile workflow) into the rig's project, assigns its roles
+// installWorkflow copies the composed-prompt workflow (or a statefile
+// workflow) into the rig's project, assigns its roles
 // (r.roles must be populated) and pins the response protocol on every
 // prompted state.
-func (r *p15Rig) installWorkflow(t *testing.T, statefile bool) {
+func (r *p15Rig) installWorkflow(t *testing.T, wf p15Workflow) {
 	t.Helper()
 	ctx := context.Background()
 	h := r.h
@@ -178,8 +190,13 @@ func (r *p15Rig) installWorkflow(t *testing.T, statefile bool) {
 	r.states = map[string]uuid.UUID{}
 	// Default workflow copied to the project + role assignments.
 	copyWorkflow := tmplSvc.CopyComposedToProject
-	if statefile {
+	switch wf {
+	case p15StatefileV3:
+		copyWorkflow = tmplSvc.CopyStatefileV3ToProject
+	case p15StatefileV4:
 		copyWorkflow = tmplSvc.CopyToProject
+	case p15GitGated:
+		copyWorkflow = tmplSvc.CopyGitGatedToProject
 	}
 	mid, err := copyWorkflow(ctx, r.pid.String())
 	if err != nil {
@@ -196,7 +213,7 @@ func (r *p15Rig) installWorkflow(t *testing.T, statefile bool) {
 	allowed := map[string][]string{}
 	assignments := map[string][]string{"PHASE_PLAN": {"PLANNER"}, "PLAN_VALIDATE": {"ARCHITECT"}, "IMPLEMENT": {"ENGINEER"},
 		"CONTINUE": {"ENGINEER"}, "FIX": {"ENGINEER"}, "VALIDATE": {"TESTER"}, "PHASE_VALIDATE": {"TESTER"}}
-	if statefile {
+	if wf.statefile() {
 		assignments = service.DefaultStateRoles
 	}
 	for state, roles := range assignments {

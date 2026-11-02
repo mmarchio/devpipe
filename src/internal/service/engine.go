@@ -52,6 +52,11 @@ type Checkpointer interface {
 	FindAllByKey(ctx context.Context, dir, key string) ([]*gitcheckpoint.Commit, error)
 }
 
+// TaskScopeReader reads the task scope a project's orchestrator works on.
+type TaskScopeReader interface {
+	TaskScope(ctx context.Context, projectID uuid.UUID) (wbs.TaskScope, error)
+}
+
 // EngineDeps wires the engine.
 type EngineDeps struct {
 	Pool   *pgxpool.Pool
@@ -60,6 +65,9 @@ type EngineDeps struct {
 	Plans  *dbrepo.PlanRepository
 	Units  *dbrepo.WorkUnitRepository
 	Phases persistence.PhaseRepository
+	// TaskScopes is the project's selected task scope (nil: every task,
+	// MVP and FULL).
+	TaskScopes TaskScopeReader
 
 	Projects        persistence.ProjectRepository
 	ProjectSettings persistence.SettingsRepository
@@ -93,7 +101,10 @@ type EngineDeps struct {
 
 	Runner       ValidationRunner
 	Checkpointer Checkpointer
-	Inspector    execution.RepositoryInspector
+	// GitFlow runs the git-gated workflow's branch operations (nil: that
+	// workflow stops for recovery).
+	GitFlow   GitFlow
+	Inspector execution.RepositoryInspector
 	// MaxValidations bounds simultaneous validation command runs across
 	// executions (WBS 18.93; 0 = unlimited).
 	MaxValidations int
@@ -145,6 +156,9 @@ type Engine struct {
 	// taskOps holds the recovery-screen task analysis / fix running per
 	// execution (TaskOpAnalyze / TaskOpFix).
 	taskOps sync.Map
+	// steps holds the step running per execution in this process, so
+	// ClearProcesses can interrupt it.
+	steps sync.Map
 }
 
 // Engine errors.
@@ -316,6 +330,10 @@ type engineState struct {
 	units    []*wbs.WorkUnit
 	unit     *wbs.WorkUnit
 	last     *persistence.StepRecord
+	// scope is the project's selected task scope: with MVP, the plan's
+	// FULL tasks that have not started are deferred (never selected, and
+	// they do not hold the phase open).
+	scope wbs.TaskScope
 }
 
 func (st *engineState) cwd() string { return st.content.WorkingDirectory }
@@ -341,6 +359,12 @@ func (e *Engine) load(ctx context.Context, id uuid.UUID) (*engineState, error) {
 	}
 	if st.project, err = e.d.Projects.Get(ctx, st.rec.ProjectID.String()); err != nil {
 		return nil, err
+	}
+	st.scope = wbs.TaskScopeFULL
+	if e.d.TaskScopes != nil {
+		if st.scope, err = e.d.TaskScopes.TaskScope(ctx, st.rec.ProjectID); err != nil {
+			return nil, err
+		}
 	}
 	snap, err := e.d.Execs.GetSnapshot(ctx, id)
 	if err != nil {
@@ -429,6 +453,16 @@ func (e *Engine) load(ctx context.Context, id uuid.UUID) (*engineState, error) {
 	return st, nil
 }
 
+// selectedUnits are the current plan's units the orchestrator works on
+// under the project's task scope.
+func (st *engineState) selectedUnits() []*wbs.WorkUnit { return wbs.SelectedUnits(st.units, st.scope) }
+
+// phaseWorkDone reports whether every selected unit of the current plan
+// is DONE (deferred FULL units do not count).
+func (st *engineState) phaseWorkDone() bool {
+	return wbs.SelectedCompletionEligible(st.plan, st.units, st.scope)
+}
+
 // workPhase is the phase the engine is working on.
 func (st *engineState) workPhase() *phase.Phase {
 	if st.posPhase != nil && st.posPhase.Status != phase.StatusDONE {
@@ -456,6 +490,8 @@ func (e *Engine) handler(a execution.StepAction) stepHandler {
 		return e.handleTestCheck
 	case execution.ActionAcceptanceCheck:
 		return e.handleAcceptanceCheck
+	case execution.ActionQATestsCheck:
+		return e.handleQATestsCheck
 	case execution.ActionPlanDispatch:
 		return e.handlePlanDispatch
 	case execution.ActionPlanValidate:
@@ -619,6 +655,20 @@ func (e *Engine) safeStep(ctx context.Context, d *driver) (res execution.StepRes
 
 // step is one Step under a held lease.
 func (e *Engine) step(ctx context.Context, d *driver) (execution.StepResult, error) {
+	ctx, unregister := e.trackStep(ctx, d.id)
+	defer unregister()
+	res, err := e.runStep(ctx, d)
+	if errors.Is(context.Cause(ctx), ErrProcessesCleared) {
+		// The operator interrupted the step (ClearProcesses): it stays
+		// INTENT and the requested requeue abandons it.
+		return execution.StepResult{Outcome: execution.StepNoop, Action: res.Action, State: res.State, StepSeq: res.StepSeq,
+			Reason: "interrupted: processes cleared by the operator"}, nil
+	}
+	return res, err
+}
+
+// runStep is step's body.
+func (e *Engine) runStep(ctx context.Context, d *driver) (execution.StepResult, error) {
 	ctx = logging.WithFields(ctx, "execution_id", d.id.String())
 	st, err := e.load(ctx, d.id)
 	if err != nil {
@@ -633,17 +683,16 @@ func (e *Engine) step(ctx context.Context, d *driver) (execution.StepResult, err
 		return execution.StepResult{Outcome: execution.StepNoop, Reason: "project is " + string(st.project.Status)}, nil
 	}
 	// A requested requeue applies at a step boundary (never while a step
-	// is pending): the running step finished before this one.
-	if st.last == nil || st.last.Status != execution.StepIntent {
-		if pending, err := e.pendingRequeue(ctx, st); err != nil {
-			return execution.StepResult{}, translate(err)
-		} else if pending {
-			from, key := st.cur.Key, wbs.UnitKey(st.unit)
-			if err := e.applyRequeue(ctx, st); err != nil {
-				return execution.StepResult{}, err
-			}
-			return execution.StepResult{Outcome: execution.StepProgressed, State: from, Reason: "task " + key + " requeued"}, nil
+	// is pending): the running step finished before this one. A requeue
+	// from ClearProcesses also abandons a pending (interrupted) step.
+	if req, err := e.pendingRequeue(ctx, st); err != nil {
+		return execution.StepResult{}, translate(err)
+	} else if req != nil && (st.last == nil || st.last.Status != execution.StepIntent || interruptsStep(req)) {
+		from, key := st.cur.Key, wbs.UnitKey(st.unit)
+		if err := e.applyRequeue(ctx, st); err != nil {
+			return execution.StepResult{}, err
 		}
+		return execution.StepResult{Outcome: execution.StepProgressed, State: from, Reason: "task " + key + " requeued"}, nil
 	}
 	action := execution.ResolveAction(st.cur)
 	if st.curRec != nil && execution.IsCommandTemplate(st.curRec.PromptTemplate) {
@@ -1092,7 +1141,7 @@ func (e *Engine) wait(ctx context.Context, st *engineState, step *persistence.St
 // version, the next unit.
 func (e *Engine) controlFacts(ctx context.Context, st *engineState) execution.RoutingFacts {
 	work := st.workPhase()
-	in := execution.RoutingInput{CurrentWBSVersion: st.wbsVer, Plans: st.plans, Units: st.units}
+	in := execution.RoutingInput{CurrentWBSVersion: st.wbsVer, Plans: st.plans, Units: st.selectedUnits()}
 	if work != nil {
 		// Restrict routing to the working phase: only it and DONE phases
 		// are presented, so an appended phase never becomes current early.
@@ -1104,10 +1153,16 @@ func (e *Engine) controlFacts(ctx context.Context, st *engineState) execution.Ro
 	}
 	if st.plan != nil {
 		if el, err := e.d.Units.ListEligible(ctx, st.plan.ID); err == nil {
-			in.EligibleUnits = el
+			in.EligibleUnits = wbs.SelectedUnits(el, st.scope)
 		}
 	}
-	return execution.ResolveRouting(in)
+	f := execution.ResolveRouting(in)
+	if f.NoExecutableUnit && len(in.Units) == 0 && st.phaseWorkDone() {
+		// Every unit of the plan is deferred: the phase's selected work
+		// is done.
+		f.NoExecutableUnit, f.AllUnitsDone = false, true
+	}
+	return f
 }
 
 // handleControl resolves a control state's outcome from authoritative

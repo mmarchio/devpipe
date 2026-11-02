@@ -2,6 +2,20 @@
 {{define "content"}}
 <h1>Phases</h1>
 {{with .Data.OrderError}}<div class="banner" role="alert">{{.}}</div>{{end}}
+<section class="panel" aria-labelledby="scope-h">
+<h2 id="scope-h">Tasks to work on</h2>
+<p>Planning categorizes every task as <strong>MVP</strong> (minimum viable product) or <strong>FULL</strong> (full release). The orchestrator works only on the selected tasks.</p>
+{{with .Data.ScopeError}}<div class="banner" role="alert">{{.}}</div>{{end}}
+<form method="post" action="/projects/{{.Shell.Project.ID}}/task-scope">
+{{template "csrf" .Shell.CSRF}}
+<fieldset><legend>Tasks</legend>
+<label><input type="radio" name="scope" value="MVP"{{if eq .Data.TaskScope "MVP"}} checked{{end}}> MVP only</label>
+<label><input type="radio" name="scope" value="FULL"{{if ne .Data.TaskScope "MVP"}} checked{{end}}> MVP and FULL</label>
+</fieldset>
+<p class="hint">With MVP only, a phase completes once its MVP tasks are done; its FULL tasks stay pending and are not started. A FULL task already under way is finished. Switching to MVP and FULL applies to phases that are not done yet.</p>
+<button type="submit" data-pending="Saving…">Save</button>
+</form>
+</section>
 {{$reorder := .Data.Reorderable}}
 <form method="post" action="/projects/{{.Shell.Project.ID}}/phases/order" data-phase-order>
 {{template "csrf" .Shell.CSRF}}

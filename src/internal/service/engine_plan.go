@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,7 +59,7 @@ func (e *Engine) handlePlanDispatch(ctx context.Context, st *engineState, step *
 // phase validation failed.
 func (e *Engine) planMode(ctx context.Context, st *engineState) string {
 	work := st.workPhase()
-	if work == nil || st.plan == nil || st.plan.WBSVersion != st.wbsVer || !wbs.PhaseCompletionEligible(st.plan, st.units) {
+	if work == nil || st.plan == nil || st.plan.WBSVersion != st.wbsVer || !st.phaseWorkDone() {
 		return wbs.PlanKindInitial
 	}
 	run, err := e.d.Repo.LatestValidationRun(ctx, nil, st.rec.ID, execution.ScopePhase, work.ID)
@@ -65,6 +67,41 @@ func (e *Engine) planMode(ctx context.Context, st *engineState) string {
 		return wbs.PlanKindAmendment
 	}
 	return wbs.PlanKindInitial
+}
+
+// amendmentContext is what a PLAN command carries when the phase's
+// validation failed and the plan is amended: the failure, and that the
+// current tasks are kept while new repair tasks are added.
+func (e *Engine) amendmentContext(ctx context.Context, st *engineState) (string, error) {
+	work := st.workPhase()
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n\nThe phase's validation failed after all of its tasks were done, so the phase plan is amended, not planned again. ")
+	b.WriteString("The current plan's tasks (get_context) are kept as they are — DONE tasks stay DONE — and must not be resubmitted. " +
+		"Plan only the new repair tasks that make the phase validation pass, each with a new key (for example <phase prefix>-R001); they " +
+		"may depend on existing tasks.")
+	fmt.Fprintf(&b, " The overseer runs the phase validation itself, in %s, as %s.", st.cwd(), validationUser())
+	run, err := e.d.Repo.LatestValidationRun(ctx, nil, st.rec.ID, execution.ScopePhase, work.ID)
+	if errors.Is(err, persistence.ErrNotFound) {
+		return feedback(b.String()), nil
+	} else if err != nil {
+		return "", err
+	}
+	b.WriteString("\n\nThe failure:\n")
+	size := 0
+	for _, r := range run.Records {
+		if r.Outcome == execution.ValidationPass {
+			continue
+		}
+		fmt.Fprintf(&b, "`%s %s` → %s\n", r.Program, strings.Join(r.Args, " "), r.Outcome)
+		for _, l := range failureLines(r) {
+			if size += len(l); size > 6000 {
+				b.WriteString("    …\n")
+				break
+			}
+			b.WriteString("    " + l + "\n")
+		}
+	}
+	return feedback(b.String()), nil
 }
 
 // candidateFor turns the planning dispatch into a persisted plan candidate
@@ -182,13 +219,24 @@ func withoutCarried(pc *wbs.PlanCandidate, current []*wbs.WorkUnit) *wbs.PlanCan
 }
 
 // validateCandidate runs every deterministic plan check (WBS 16.16/16.17);
-// carried are the keys an amendment may depend on.
-func validateCandidate(pc *wbs.PlanCandidate, pol wbs.AtomicPolicy, carried []string) wbs.PlanProblems {
+// carried are the keys an amendment may depend on. A workflow in which
+// the overseer accepts tasks itself also refuses MANUAL criteria.
+func validateCandidate(st *engineState, pc *wbs.PlanCandidate, carried []string) wbs.PlanProblems {
 	// Every group is reported, so a rejected planner can fix all of them
 	// in one attempt.
 	p := wbs.ValidateAmendmentStructure(pc, carried)
-	p = append(p, wbs.ValidateAtomicPolicy(pc, pol)...)
+	p = append(p, wbs.ValidateAtomicPolicy(pc, st.engine.AtomicPolicy)...)
+	if st.automatedAcceptance() {
+		p = append(p, wbs.ValidateAutomatedChecks(pc)...)
+	}
 	p = append(p, wbs.ValidatePlanScope(pc)...)
+	existing := map[string]wbs.TaskScope{}
+	for _, u := range st.units {
+		existing[wbs.UnitKey(u)] = wbs.UnitScope(u)
+	}
+	// The statefile workflow's planner is told to categorize every task
+	// (mcpInstructions); elsewhere an uncategorized task is MVP.
+	p = append(p, wbs.ValidateTaskScopes(pc, existing, st.statefileWorkflow())...)
 	return append(p, wbs.ValidatePrograms(pc, programFound)...)
 }
 
@@ -230,7 +278,7 @@ func (e *Engine) handlePlanValidate(ctx context.Context, st *engineState, step *
 				carried = append(carried, wbs.UnitKey(u))
 			}
 		}
-		problems = validateCandidate(pc, st.engine.AtomicPolicy, carried)
+		problems = validateCandidate(st, pc, carried)
 		if len(problems) == 0 && mode == wbs.PlanKindAmendment {
 			deps, err := e.d.Repo.UnitDependencies(ctx, nil, st.plan.ID)
 			if err != nil {

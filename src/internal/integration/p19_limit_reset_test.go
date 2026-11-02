@@ -189,3 +189,91 @@ func TestP19RepeatedFailureReplansTask(t *testing.T) {
 		t.Fatalf("%d replan events, want 1", n)
 	}
 }
+
+// A replan may split the task into sub-tasks: they are inserted before
+// the task, run first in the submitted order, and the task (which now
+// depends on them) runs after them; the task that depends on it keeps
+// waiting for it.
+func TestP19ReplanSplitsTask(t *testing.T) {
+	r := p16NewRigWith(t, p16Options{statefile: true})
+	team := newSFTeam(t, r)
+	team.replanCheck, team.replanSplit = "A2", true
+	r.g.Responder = team.respond
+	r.setCheck(t, "A", 1) // the original validation can never pass
+	res, err := r.eng().Run(context.Background(), r.execID, 400)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, p16Trace(res))
+	}
+	if st := r.execStatus(t); st != string(execution.ExecutionCompleted) {
+		t.Fatalf("execution %s, recovery %q\ncommands %q\ntrace: %s", st, r.recoveryReason(t), team.commandLines(), p16Trace(res))
+	}
+	team.mu.Lock()
+	replans := append([]string(nil), team.replans...)
+	team.mu.Unlock()
+	if len(replans) != 1 || !strings.Contains(replans[0], "split it") {
+		t.Fatalf("replan commands %q", replans)
+	}
+	cmds := team.commandLines()
+	after := cmds[strings.Index(cmds, "have the architect replan task A"):]
+	want := strings.Join([]string{"have the architect replan task A",
+		"implement task A.1", "test task A.1", "have the project manager perform acceptance tasks",
+		"implement task A.2", "test task A.2", "have the project manager perform acceptance tasks",
+		"implement task A", "test task A", "have the project manager perform acceptance tasks",
+		"implement task B", "test task B", "have the project manager perform acceptance tasks"}, " | ")
+	if after != want {
+		t.Fatalf("commands after the replan\n got %s\nwant %s", after, want)
+	}
+	var order string
+	if err := r.h.DBScan(context.Background(), "SELECT string_agg(unit_key, ',' ORDER BY sequence) FROM work_units WHERE execution_plan_id = "+
+		"(SELECT execution_plan_id FROM work_units WHERE unit_key = 'A' AND project_id = '"+r.pid.String()+"')", &order); err != nil {
+		t.Fatal(err)
+	}
+	if order != "A.1,A.2,A,B" {
+		t.Fatalf("plan order %s, want A.1,A.2,A,B", order)
+	}
+	if n := r.count(t, "SELECT count(*) FROM work_unit_dependencies d JOIN work_units a ON a.id = d.work_unit_id JOIN work_units p ON p.id = d.depends_on_work_unit_id "+
+		"WHERE a.unit_key = 'A' AND p.unit_key IN ('A.1', 'A.2') AND a.project_id = '"+r.pid.String()+"'"); n != 2 {
+		t.Fatalf("A depends on %d of its parts, want 2", n)
+	}
+	if n := r.count(t, "SELECT count(*) FROM execution_events WHERE type = 'WORK_UNIT_REPLANNED' AND payload->'split_into' = '[\"A.1\", \"A.2\"]' "+
+		"AND execution_id = '"+r.execID.String()+"'"); n != 1 {
+		t.Fatalf("%d split replan events, want 1", n)
+	}
+}
+
+// After a failed phase validation the PLAN command says the plan is
+// amended and carries the failure; a plan that only resubmits the current
+// tasks is rejected with that explanation, and the repair task it then
+// adds runs and makes the phase pass.
+func TestP19PhaseAmendmentAddsRepairTasks(t *testing.T) {
+	r := p16NewRigWith(t, p16Options{statefile: true})
+	team := newSFTeam(t, r)
+	team.amendRepair = true
+	team.repaired = func() { r.setCheck(t, "phase", 0) }
+	r.g.Responder = team.respond
+	r.setCheck(t, "phase", 1)
+	res, err := r.eng().Run(context.Background(), r.execID, 400)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, p16Trace(res))
+	}
+	if st := r.execStatus(t); st != string(execution.ExecutionCompleted) {
+		t.Fatalf("execution %s, recovery %q\ncommands %s\ntrace: %s", st, r.recoveryReason(t), team.commandLines(), p16Trace(res))
+	}
+	team.mu.Lock()
+	amendments := append([]string(nil), team.amendments...)
+	team.mu.Unlock()
+	if len(amendments) != 2 {
+		t.Fatalf("%d amendment plan commands, want 2", len(amendments))
+	}
+	for _, want := range []string{"must not be resubmitted", "The failure:", "phase failed", "only the new repair tasks"} {
+		if !strings.Contains(amendments[0], want) {
+			t.Fatalf("amendment command lacks %q:\n%s", want, amendments[0])
+		}
+	}
+	if !strings.Contains(amendments[1], "ONLY_EXISTING_TASKS") || !strings.Contains(amendments[1], "all 2 submitted tasks reuse their keys") {
+		t.Fatalf("the resubmitted plan was not rejected with the explanation:\n%s", amendments[1])
+	}
+	if n := team.countCmd("implement task R1"); n != 1 {
+		t.Fatalf("implement task R1 sent %d times, want 1", n)
+	}
+}

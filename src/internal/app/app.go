@@ -802,6 +802,10 @@ func (a *App) Start(ctx context.Context) error {
 		db.Close()
 		return fmt.Errorf("app: register phase routes: %w", err)
 	}
+	if err := web.RegisterTaskScopeRoutes(router, dbrepo.NewTaskScopeRepository(db.Raw())); err != nil {
+		db.Close()
+		return fmt.Errorf("app: register task scope routes: %w", err)
+	}
 	// WBS document service + REST API (WBS 3.18).
 	versionRepo := dbrepo.NewWBSVersionRepository(db.Raw())
 	wbsSvc := service.NewWBSDocumentService(
@@ -1250,6 +1254,7 @@ func (a *App) startEngine(ctx context.Context, router *web.Router, lifecycleSvc 
 		Repo:            engRepo,
 		Plans:           dbrepo.NewPlanRepository(pool),
 		Units:           dbrepo.NewWorkUnitRepository(pool),
+		TaskScopes:      dbrepo.NewTaskScopeRepository(pool),
 		Phases:          dbrepo.NewPhaseRepository(pool),
 		Projects:        dbrepo.NewProjectRepository(pool),
 		ProjectSettings: dbrepo.NewSettingsRepository(pool),
@@ -1276,6 +1281,7 @@ func (a *App) startEngine(ctx context.Context, router *web.Router, lifecycleSvc 
 		MaxValidations: a.cfg.Engine.EffectiveMaxValidations(),
 		Invariants:     dbrepo.NewIntegrityScanner(pool),
 		Checkpointer:   a.checkpointer(),
+		GitFlow:        a.checkpointer(),
 		Inspector:      a.repoInspector(),
 		Identifier:     a.repoInspector(),
 		Identities:     dbrepo.NewRepositoryIdentityStore(pool),

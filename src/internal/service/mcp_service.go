@@ -146,8 +146,10 @@ var reportKinds = map[string]string{
 	"IMPLEMENT":  persistence.ReportImplement, "CONTINUE": persistence.ReportImplement,
 	// A fix may rewrite the task definition: its result carries the task
 	// as a one-task plan (optional).
-	"FIX_TASK":     persistence.ReportPlan,
-	"TEST":         persistence.ReportTest,
+	"FIX_TASK": persistence.ReportPlan,
+	"TEST":     persistence.ReportTest,
+	// The git-gated workflow's QA tests report like an implementation.
+	"QA_TESTS":     persistence.ReportImplement,
 	"ANALYZE_TASK": persistence.ReportAnalysis,
 }
 
@@ -191,6 +193,7 @@ type MCPTask struct {
 	Key              string     `json:"key"`
 	Name             string     `json:"name"`
 	Kind             string     `json:"kind"`
+	Scope            string     `json:"scope"`
 	Status           string     `json:"status"`
 	Archived         bool       `json:"archived"`
 	Objective        string     `json:"objective"`
@@ -205,6 +208,7 @@ type MCPTask struct {
 type MCPPlanTask struct {
 	Key       string   `json:"key"`
 	Name      string   `json:"name"`
+	Scope     string   `json:"scope"`
 	Status    string   `json:"status"`
 	Archived  bool     `json:"archived"`
 	DependsOn []string `json:"depends_on,omitempty"`
@@ -313,7 +317,7 @@ func (s *MCPService) Task(ctx context.Context, b *MCPBinding, key string) (*MCPT
 	if err != nil {
 		return nil, err
 	}
-	t := &MCPTask{Key: wbs.UnitKey(u), Name: u.Name, Kind: string(u.Kind), Status: string(u.Status), Archived: archived[u.ID],
+	t := &MCPTask{Key: wbs.UnitKey(u), Name: u.Name, Kind: string(u.Kind), Scope: wbs.UnitScope(u).String(), Status: string(u.Status), Archived: archived[u.ID],
 		DependsOn: deps[u.ID], AcceptanceChecks: []MCPCheck{}}
 	if sp := u.Specification; sp != nil {
 		t.Objective, t.Instructions, t.Paths = sp.Objective, sp.ImplementationInstructions, append([]string(nil), sp.Paths...)
@@ -383,7 +387,7 @@ func (s *MCPService) Context(ctx context.Context, b *MCPBinding) (*MCPContext, e
 		return nil, err
 	}
 	for _, u := range st.units {
-		out.Plan = append(out.Plan, MCPPlanTask{Key: wbs.UnitKey(u), Name: u.Name, Status: string(u.Status), Archived: archived[u.ID], DependsOn: deps[u.ID]})
+		out.Plan = append(out.Plan, MCPPlanTask{Key: wbs.UnitKey(u), Name: u.Name, Scope: wbs.UnitScope(u).String(), Status: string(u.Status), Archived: archived[u.ID], DependsOn: deps[u.ID]})
 	}
 	if st.unit != nil {
 		out.ActiveTask = wbs.UnitKey(st.unit)

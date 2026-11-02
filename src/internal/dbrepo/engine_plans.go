@@ -313,6 +313,80 @@ func (r *EngineRepository) ReplanUnit(ctx context.Context, ex persistence.Execut
 	return nil
 }
 
+// SplitUnit inserts the sub-tasks of a split unit right before it in its
+// plan and makes the unit depend on every one of them. Sequences are
+// unique per plan, so the unit and everything after it first move past
+// the plan's end and then back to their place after the parts.
+func (r *EngineRepository) SplitUnit(ctx context.Context, ex persistence.Executor, unitID uuid.UUID, parts []wbs.PlannedUnit) ([]*wbs.WorkUnit, error) {
+	if ex == nil {
+		return nil, errors.New("dbrepo: SplitUnit requires a transaction")
+	}
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	var planID uuid.UUID
+	var seq, last int
+	if err := ex.QueryRow(ctx, `SELECT execution_plan_id, sequence FROM work_units WHERE id = $1 FOR UPDATE`, unitID).Scan(&planID, &seq); err != nil {
+		return nil, TranslateDBError("split work unit", err)
+	}
+	if err := ex.QueryRow(ctx, `SELECT max(sequence) FROM work_units WHERE execution_plan_id = $1`, planID).Scan(&last); err != nil {
+		return nil, TranslateDBError("split work unit", err)
+	}
+	n, away := len(parts), last+len(parts)+1
+	if _, err := ex.Exec(ctx, `UPDATE work_units SET sequence = sequence + $3, updated_at = now() WHERE execution_plan_id = $1 AND sequence >= $2`,
+		planID, seq, away); err != nil {
+		return nil, TranslateDBError("move split work units", err)
+	}
+	if _, err := ex.Exec(ctx, `UPDATE work_units SET sequence = sequence - $3::int + $4::int WHERE execution_plan_id = $1 AND sequence >= $2::int + $3::int`,
+		planID, seq, away, n); err != nil {
+		return nil, TranslateDBError("move split work units", err)
+	}
+	units, err := r.ListPlanUnits(ctx, ex, planID)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[string]uuid.UUID{}
+	for _, u := range units {
+		ids[wbs.UnitKey(u)] = u.ID
+	}
+	wus := NewWorkUnitRepositoryForExecutor(ex)
+	var out []*wbs.WorkUnit
+	for i, pu := range parts {
+		if _, dup := ids[pu.Key]; dup {
+			return nil, fmt.Errorf("%w: key %q is already used in the plan", persistence.ErrConflict, pu.Key)
+		}
+		u, err := wbs.NewWorkUnit(planID, seq+i, pu.Name, pu.Kind)
+		if err != nil {
+			return nil, err
+		}
+		spec := pu.Spec
+		spec.Key = pu.Key
+		u.Specification = &spec
+		u.Description = spec.Objective
+		u.Status = wbs.WorkUnitStatusPENDING
+		if err := wus.Create(ctx, u); err != nil {
+			return nil, err
+		}
+		ids[pu.Key] = u.ID
+		out = append(out, u)
+	}
+	for i, pu := range parts {
+		for _, d := range pu.DependsOnKeys {
+			did, ok := ids[d]
+			if !ok {
+				return nil, fmt.Errorf("dbrepo: unknown dependency key %q", d)
+			}
+			if err := wus.AddDependency(ctx, out[i].ID, did); err != nil {
+				return nil, err
+			}
+		}
+		if err := wus.AddDependency(ctx, unitID, out[i].ID); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // CreatePlanWithUnits inserts a plan, its units and their dependencies in
 // the caller's transaction (WBS 16.18): either all rows exist or none.
 func (r *EngineRepository) CreatePlanWithUnits(ctx context.Context, ex persistence.Executor, plan *wbs.ExecutionPlan, units []wbs.PlannedUnit) ([]*wbs.WorkUnit, error) {
